@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "es6",
+    "module": "es6",
+    "strict": true,
+    "allowJs": true,
+    "checkJs": false,
+    "lib": ["es6", "dom"],
+    "skipLibCheck": true,
+  "forceConsistentCasingInFileNames": true,
+  "noEmit": true
+  },
+  "include": ["src/**/*.js"]
+}
