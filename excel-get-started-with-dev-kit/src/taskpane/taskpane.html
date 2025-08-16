@@ -55,6 +55,12 @@
                 </label>
             </fieldset>
 
+            <div class="field-group">
+                <label class="ms-font-m" for="dry-run">
+                    <input type="checkbox" id="dry-run" /> Dry run (analyze only)
+                </label>
+            </div>
+
             <div class="actions">
                 <button id="run-compare" class="ms-Button ms-Button--hero" disabled aria-disabled="true">
                     <span class="ms-Button-label">Run Compare</span>
@@ -67,6 +73,7 @@
                 </button>
             </div>
             <div id="validation" class="validation" aria-live="polite" aria-atomic="true"></div>
+            <div id="dry-run-results" class="ms-font-s" aria-live="polite" aria-atomic="true"></div>
         </div>
     </main>
 </body>
