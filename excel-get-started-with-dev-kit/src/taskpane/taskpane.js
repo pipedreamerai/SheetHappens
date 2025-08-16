@@ -3,6 +3,7 @@
  * See LICENSE in the project root for license information.
  */
 
+/* eslint-disable prettier/prettier, office-addins/load-object-before-read */
 /* global document, Office, Excel */
 
 Office.onReady((info) => {
@@ -11,10 +12,16 @@ Office.onReady((info) => {
     const appBody = document.getElementById("app-body");
     if (sideload) sideload.style.display = "none";
     if (appBody) appBody.classList.remove("is-hidden");
-    // Initialize dropdowns and validation message.
-    initSheetDropdowns();
+  // Initialize dropdowns and validation message.
+  initSheetDropdowns();
+  // Wire overlay actions.
+  wireApplyOverlay();
+  wireRemoveOverlay();
   }
 });
+
+const OVERLAY_TAG = 'CC_OVERLAY';
+const OVERLAY_COLOR = '#FFF2CC'; // soft yellow as example overlay color
 
 function initSheetDropdowns() {
   const src = document.getElementById("source-sheet");
@@ -67,10 +74,21 @@ function initSheetDropdowns() {
         msg.textContent = same ? "Please choose two different sheets." : "";
       }
       const runBtn = document.getElementById("run-compare");
+      const applyBtn = document.getElementById("apply-overlay");
+      const removeBtn = document.getElementById("remove-overlay");
+      const valid = Boolean(src.value) && Boolean(dst.value) && !same;
+      const overlayValid = Boolean(src.value);
       if (runBtn) {
-        const valid = Boolean(src.value) && Boolean(dst.value) && !same;
         runBtn.setAttribute("aria-disabled", String(!valid));
         runBtn.disabled = !valid; // stays disabled in this commit, but reflects validity
+      }
+      if (applyBtn) {
+        applyBtn.setAttribute("aria-disabled", String(!overlayValid));
+        applyBtn.disabled = !overlayValid;
+      }
+      if (removeBtn) {
+        removeBtn.setAttribute("aria-disabled", String(!overlayValid));
+        removeBtn.disabled = !overlayValid;
       }
     }
 
@@ -79,5 +97,110 @@ function initSheetDropdowns() {
     validate();
   }).catch((err) => {
     if (msg) msg.textContent = "Unable to enumerate worksheets: " + String(err && err.message ? err.message : err);
+  });
+}
+
+function wireApplyOverlay() {
+  const btn = document.getElementById("apply-overlay");
+  if (!btn) return;
+  btn.addEventListener("click", () => {
+    const srcSel = document.getElementById("source-sheet");
+    const msg = document.getElementById("validation");
+    const sName = srcSel && srcSel.value ? srcSel.value : "";
+    if (!sName) {
+      if (msg) msg.textContent = "Select a source sheet before applying overlay.";
+      return;
+    }
+    Excel.run(async (context) => {
+      const wb = context.workbook;
+      const s1 = wb.worksheets.getItem(sName);
+      const r1 = s1.getUsedRangeOrNullObject();
+      r1.load(["address"]);
+      await context.sync();
+
+      function addOverlay(range) {
+        if (!range || range.isNullObject) return;
+        const cfs = range.conditionalFormats;
+        const cf = cfs.add(Excel.ConditionalFormatType.custom);
+        cf.custom.rule.formula = `OR(TRUE,N("${OVERLAY_TAG}"))`;
+        cf.custom.format.fill.color = OVERLAY_COLOR;
+        // Ensure it doesn't block other rules
+        cf.stopIfTrue = false;
+      }
+
+      addOverlay(r1);
+      await context.sync();
+      if (msg) msg.textContent = "Overlay applied to source sheet (used range).";
+    }).catch((err) => {
+      if (msg) msg.textContent = "Failed to apply overlay: " + String(err && err.message ? err.message : err);
+    });
+  });
+}
+
+function wireRemoveOverlay() {
+  const btn = document.getElementById("remove-overlay");
+  if (!btn) return;
+  btn.addEventListener("click", () => {
+    const srcSel = document.getElementById("source-sheet");
+    const msg = document.getElementById("validation");
+    const sName = srcSel && srcSel.value ? srcSel.value : "";
+    if (!sName) {
+      if (msg) msg.textContent = "Select a source sheet before removing overlay.";
+      return;
+    }
+    Excel.run(async (context) => {
+      const wb = context.workbook;
+      const s1 = wb.worksheets.getItem(sName);
+      const r1 = s1.getUsedRangeOrNullObject();
+      // Load to allow access
+      r1.load(["address"]);
+      await context.sync();
+
+      function removeOverlay(range) {
+        if (!range || range.isNullObject) return;
+        const cfs = range.conditionalFormats;
+        cfs.load("items");
+        return cfs;
+      }
+
+      const cf1 = removeOverlay(r1);
+      await context.sync();
+
+      function deleteTaggedOverlays(cfs) {
+        if (!cfs || !cfs.items) return;
+        // Queue loading of custom formulas for custom CFs
+        const customs = [];
+        cfs.items.forEach((cf) => {
+          if (cf.type === Excel.ConditionalFormatType.custom) {
+            cf.custom.rule.load("formula");
+            customs.push(cf);
+          }
+        });
+        return customs;
+      }
+
+      const customs1 = deleteTaggedOverlays(cf1);
+      await context.sync();
+
+      function purge(customs) {
+        if (!customs) return;
+        customs.forEach((cf) => {
+          try {
+            const formula = cf.custom.rule.formula || "";
+            if (typeof formula === "string" && formula.indexOf(OVERLAY_TAG) !== -1) {
+              cf.delete();
+            }
+          } catch (e) {
+            // ignore and continue
+          }
+        });
+      }
+
+      purge(customs1);
+      await context.sync();
+      if (msg) msg.textContent = "Overlay removed on source sheet.";
+    }).catch((err) => {
+      if (msg) msg.textContent = "Failed to remove overlay: " + String(err && err.message ? err.message : err);
+    });
   });
 }
