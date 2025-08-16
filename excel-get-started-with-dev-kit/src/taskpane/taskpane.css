@@ -82,3 +82,26 @@ b {
 .is-hidden {
     display: none !important;
 }
+
+/* Compare UI layout */
+.compare-container {
+    width: 100%;
+    max-width: 420px;
+}
+
+.field-group {
+    display: -ms-flexbox;
+    display: flex;
+    -ms-flex-direction: column;
+    flex-direction: column;
+    margin: 8px 0 14px 0;
+}
+
+select#source-sheet,
+select#second-sheet {
+    padding: 6px 8px;
+}
+
+.actions {
+    margin-top: 10px;
+}

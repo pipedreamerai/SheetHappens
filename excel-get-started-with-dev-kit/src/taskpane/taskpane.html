@@ -29,8 +29,38 @@
         <h2 class="ms-font-xl">Please <a target="_blank" rel="noopener noreferrer" href="https://learn.microsoft.com/office/dev/add-ins/testing/test-debug-office-add-ins#sideload-an-office-add-in-for-testing">sideload</a> your add-in to see app body.</h2>
     </section>
     <main id="app-body" class="ms-welcome__main is-hidden">
-        <p class="ms-font-l">This is a placeholder for the Compare Sheets add-in UI.</p>
-        <p class="ms-font-m">Use the ribbon button to open this pane. Further controls will be added in subsequent commits.</p>
+        <div class="compare-container" role="form" aria-label="Compare Sheets">
+            <div class="field-group">
+                <label class="ms-font-m" for="source-sheet">Source sheet</label>
+                <select id="source-sheet" class="ms-font-m" aria-label="Source sheet">
+                    <option value="" selected>Select a sheet…</option>
+                </select>
+            </div>
+            <div class="field-group">
+                <label class="ms-font-m" for="second-sheet">Second sheet</label>
+                <select id="second-sheet" class="ms-font-m" aria-label="Second sheet">
+                    <option value="" selected>Select a sheet…</option>
+                </select>
+            </div>
+
+            <fieldset class="field-group" aria-label="Range mode">
+                <legend class="ms-font-m">Range mode</legend>
+                <label class="ms-font-m">
+                    <input type="radio" name="range-mode" value="used" checked />
+                    Used range of both sheets
+                </label>
+                <label class="ms-font-m">
+                    <input type="radio" name="range-mode" value="selected" />
+                    Selected range
+                </label>
+            </fieldset>
+
+            <div class="actions">
+                <button id="run-compare" class="ms-Button ms-Button--hero" disabled aria-disabled="true">
+                    <span class="ms-Button-label">Run Compare</span>
+                </button>
+            </div>
+        </div>
     </main>
 </body>
 

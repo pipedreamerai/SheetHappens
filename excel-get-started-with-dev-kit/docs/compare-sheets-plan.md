@@ -145,10 +145,10 @@ Apply rules in this order per cell pair:
    - Manual scenarios and large-range stress checks.
 
 ### Commit-by-commit plan (each step is user-testable)
-1) Wire up "Compare Sheets" ribbon button and empty task pane
+1) Wire up "Compare Sheets" ribbon button and empty task pane (done)
   - Visible change: New ribbon button opens a task pane with a placeholder title.
   - Test: Click button, pane opens without errors.
-2) Basic task pane UI shell
+2) Basic task pane UI shell (done)
   - Add dropdowns for Source/Second sheets, range mode toggles, and disabled "Run Compare" button.
   - Test: UI renders; Run button is disabled until valid selections.
 3) Populate worksheet dropdowns
