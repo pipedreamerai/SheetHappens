@@ -5,6 +5,8 @@
 
 /* eslint-disable prettier/prettier, office-addins/load-object-before-read */
 /* global document, Office, Excel, console */
+// eslint-disable-next-line no-unused-vars
+import { buildWorkbookModel } from "../core/model";
 
 Office.onReady((info) => {
   if (info.host === Office.HostType.Excel) {
@@ -18,6 +20,7 @@ Office.onReady((info) => {
   wireApplyOverlay();
   wireRemoveOverlay();
   wireRunCompareDryRun();
+  wireDumpModel();
   }
 });
 
@@ -415,5 +418,66 @@ function wireRemoveOverlay() {
     }).catch((err) => {
       if (msg) msg.textContent = 'Failed to remove overlay: ' + String(err && err.message ? err.message : err);
     });
+  });
+}
+
+function wireDumpModel() {
+  const btn = document.getElementById("dump-model");
+  if (!btn) return;
+  btn.addEventListener("click", () => {
+    const msg = document.getElementById("validation");
+    if (msg) msg.textContent = "Building workbook model…";
+    buildWorkbookModel({ includeHidden: false, maxCellsPerSheet: 200000 })
+      .then(async (model) => {
+        try {
+          await dumpModelToLogsSheet(model);
+          if (msg) msg.textContent = "Model written to 'logs' sheet.";
+        } catch (e) {
+          if (msg) msg.textContent = "Failed to write logs: " + String(e && e.message ? e.message : e);
+        }
+      })
+      .catch((err) => {
+        if (msg) msg.textContent = "Failed to build model: " + String(err && err.message ? err.message : err);
+      });
+  });
+}
+
+async function dumpModelToLogsSheet(model) {
+  const ts = new Date().toISOString();
+  // Prepare lines: header + JSON body split across lines to avoid cell length limits
+  const header = [
+    `[${ts}] WorkbookModel dump`,
+    `Sheets: ${Array.isArray(model.sheets) ? model.sheets.length : 0}`,
+    "",
+  ];
+  const json = JSON.stringify(model, null, 2);
+  const bodyLines = json.split("\n");
+  const lines = header.concat(bodyLines).concat(["", "----", ""]);
+
+  await Excel.run(async (context) => {
+    const wb = context.workbook;
+    let logs = wb.worksheets.getItemOrNullObject("logs");
+    logs.load(["name", "visibility"]);
+    await context.sync();
+    if (logs.isNullObject) {
+      logs = wb.worksheets.add("logs");
+      // Place at the end (optional)
+      logs.position = wb.worksheets.count;
+    }
+    const used = logs.getUsedRangeOrNullObject();
+    used.load(["rowCount"]);
+    await context.sync();
+    const startRow = used.isNullObject ? 0 : (used.rowCount || 0);
+    if (!lines.length) return;
+    const rng = logs.getRangeByIndexes(startRow, 0, lines.length, 1);
+    rng.values = lines.map((l) => [l]);
+    // Make column A wide enough for readability (optional)
+    try {
+      const colA = logs.getRange("A:A");
+      colA.format.columnWidth = 120;
+    } catch (_) {
+      // ignore formatting errors
+    }
+    await context.sync();
   });
 }
