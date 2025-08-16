@@ -4,7 +4,7 @@
  */
 
 /* eslint-disable prettier/prettier, office-addins/load-object-before-read */
-/* global document, Office, Excel */
+/* global document, Office, Excel, console */
 
 Office.onReady((info) => {
   if (info.host === Office.HostType.Excel) {
@@ -23,6 +23,86 @@ Office.onReady((info) => {
 
 const OVERLAY_TAG = 'CC_OVERLAY';
 const OVERLAY_COLOR = '#FFF2CC'; // soft yellow as example overlay color
+const GREEN_COLOR = '#C6EFCE';
+const RED_COLOR = '#FFC7CE';
+
+// Persist last overlay rect so we can precisely clear even if usedRange changes later.
+const LAST_OVERLAY_KEY = 'cc_last_overlay_meta_v1';
+
+function saveSettingAsync(key, value) {
+  return new Promise((resolve, reject) => {
+    try {
+      Office.context.document.settings.set(key, value);
+      Office.context.document.settings.saveAsync((res) => {
+        if (res.status === Office.AsyncResultStatus.Succeeded) resolve();
+        else reject(res.error || new Error('Failed to save settings.'));
+      });
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+function getSetting(key) {
+  try {
+    return Office.context.document.settings.get(key);
+  } catch (_) {
+    return null;
+  }
+}
+
+// Centralized helper to delete our tagged conditional formats in a range.
+async function deleteTaggedOverlaysInRange(context, range, colorsSet) {
+  if (!range || range.isNullObject) return 0;
+  const cfs = range.conditionalFormats;
+  // Load types to filter custom formats first.
+  cfs.load('items/type');
+  await context.sync();
+
+  let customItems = cfs.items.filter((cf) => cf.type === Excel.ConditionalFormatType.custom);
+  let toDelete = [];
+
+  // Attempt formula-tag-based selection first.
+  try {
+    customItems.forEach((cf) => cf.custom.rule.load('formula'));
+    await context.sync();
+    toDelete = customItems.filter((cf) => {
+      const formula = (cf.custom && cf.custom.rule && cf.custom.rule.formula) || '';
+      return typeof formula === 'string' && formula.indexOf(OVERLAY_TAG) !== -1;
+    });
+  } catch (e) {
+    // Known intermittent issue on some platforms when reading custom.rule.formula (0x8002000b);
+    // fall back to color matching to avoid hard failure.
+    if (typeof console !== 'undefined' && console.warn) {
+      console.warn('deleteTaggedOverlaysInRange: formula read failed; falling back to color filter', e);
+    }
+    try {
+      customItems.forEach((cf) => cf.custom.format.fill.load('color'));
+      await context.sync();
+      toDelete = customItems.filter((cf) => {
+        const color = (cf.custom && cf.custom.format && cf.custom.format.fill && cf.custom.format.fill.color) || '';
+        return typeof color === 'string' && colorsSet.has(color);
+      });
+    } catch (e2) {
+      if (typeof console !== 'undefined' && console.warn) {
+        console.warn('deleteTaggedOverlaysInRange: color read also failed; skipping delete in this range', e2);
+      }
+      return 0;
+    }
+  }
+
+  // Perform deletions.
+  toDelete.forEach((cf) => {
+    try { cf.delete(); } catch (_) { /* no-op */ }
+  });
+  await context.sync();
+  return toDelete.length;
+}
+
+function quoteSheetName(name) {
+  const safe = String(name).replace(/'/g, "''");
+  return `'${safe}'`;
+}
 
 function initSheetDropdowns() {
   const src = document.getElementById("source-sheet");
@@ -147,7 +227,48 @@ function wireRunCompareDryRun() {
       await context.sync();
 
       if (!doDryRun) {
-        if (msg) msg.textContent = "Dry run is off. No formatting yet in this step.";
+        // Presence/absence overlays on source sheet only
+        if (rows && cols) {
+          const rectSrc = s1.getRangeByIndexes(0, 0, rows, cols);
+          // Load a lightweight property to ensure object is ready
+          rectSrc.load(['address']);
+          await context.sync();
+          // Clean any existing overlay rules in the target rect (tag or known colors)
+          const deleted = await deleteTaggedOverlaysInRange(context, rectSrc, new Set([GREEN_COLOR, RED_COLOR, OVERLAY_COLOR]));
+          if (typeof console !== 'undefined' && console.log) {
+            console.log('Presence/absence overlay: pre-clean deleted', deleted, 'items');
+          }
+
+          const other = quoteSheetName(dName);
+          // Relative A1 reference to the top-left of rectSrc is A1
+          const formulaGreen = `AND(NOT(ISBLANK(A1)), ISBLANK(${other}!A1), N("${OVERLAY_TAG}")=0)`;
+          const formulaRed = `AND(ISBLANK(A1), NOT(ISBLANK(${other}!A1)), N("${OVERLAY_TAG}")=0)`;
+          const cfG = rectSrc.conditionalFormats.add(Excel.ConditionalFormatType.custom);
+          cfG.custom.rule.formula = formulaGreen;
+          cfG.custom.format.fill.color = GREEN_COLOR;
+          cfG.stopIfTrue = false;
+          const cfR = rectSrc.conditionalFormats.add(Excel.ConditionalFormatType.custom);
+          cfR.custom.rule.formula = formulaRed;
+          cfR.custom.format.fill.color = RED_COLOR;
+          cfR.stopIfTrue = false;
+          await context.sync();
+          // Save last overlay rect for precise cleanup later
+          try {
+            await saveSettingAsync(LAST_OVERLAY_KEY, {
+              sheet: sName,
+              partner: dName,
+              address: rectSrc.address,
+              ts: Date.now(),
+            });
+          } catch (e) {
+            if (typeof console !== 'undefined' && console.warn) {
+              console.warn('Failed to persist last overlay rect', e);
+            }
+          }
+          if (msg) msg.textContent = 'Presence/absence overlays applied to source sheet.';
+        } else if (msg) {
+          msg.textContent = 'Nothing to compare (empty ranges).';
+        }
         return;
       }
 
@@ -211,6 +332,21 @@ function wireApplyOverlay() {
 
       addOverlay(r1);
       await context.sync();
+      // Save last overlay rect for precise cleanup later
+      try {
+        await r1.load('address');
+        await context.sync();
+        await saveSettingAsync(LAST_OVERLAY_KEY, {
+          sheet: sName,
+          partner: null,
+          address: r1.address,
+          ts: Date.now(),
+        });
+      } catch (e) {
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn('Failed to persist last overlay rect (overlay apply)', e);
+        }
+      }
       if (msg) msg.textContent = "Overlay applied to source sheet (used range).";
     }).catch((err) => {
       if (msg) msg.textContent = "Failed to apply overlay: " + String(err && err.message ? err.message : err);
@@ -232,56 +368,44 @@ function wireRemoveOverlay() {
     Excel.run(async (context) => {
       const wb = context.workbook;
       const s1 = wb.worksheets.getItem(sName);
-      const r1 = s1.getUsedRangeOrNullObject();
-      // Load to allow access
-      r1.load(["address"]);
-      await context.sync();
 
-      function removeOverlay(range) {
-        if (!range || range.isNullObject) return;
-        const cfs = range.conditionalFormats;
-        cfs.load("items");
-        return cfs;
-      }
+      let deletedTotal = 0;
+      const colors = new Set([GREEN_COLOR, RED_COLOR, OVERLAY_COLOR]);
 
-      const cf1 = removeOverlay(r1);
-      await context.sync();
-
-      function deleteTaggedOverlays(cfs) {
-        if (!cfs || !cfs.items) return;
-        // Queue loading of custom formulas for custom CFs
-        const customs = [];
-        cfs.items.forEach((cf) => {
-          if (cf.type === Excel.ConditionalFormatType.custom) {
-            cf.custom.rule.load("formula");
-            customs.push(cf);
+      // 1) Prefer the exact last overlay rect if available and still valid.
+      const meta = getSetting(LAST_OVERLAY_KEY);
+      if (meta && meta.sheet === sName && typeof meta.address === 'string') {
+        try {
+          const savedRange = s1.getRange(meta.address);
+          savedRange.load(['address']);
+          await context.sync();
+          deletedTotal += await deleteTaggedOverlaysInRange(context, savedRange, colors);
+        } catch (e) {
+          if (typeof console !== 'undefined' && console.warn) {
+            console.warn('Overlay remove: saved-range cleanup skipped', e);
           }
-        });
-        return customs;
+        }
       }
 
-      const customs1 = deleteTaggedOverlays(cf1);
+      // 2) Sweep the current source used range as a catch-all.
+      const u1 = s1.getUsedRangeOrNullObject();
+      u1.load(['rowCount', 'columnCount']);
       await context.sync();
-
-      function purge(customs) {
-        if (!customs) return;
-        customs.forEach((cf) => {
-          try {
-            const formula = cf.custom.rule.formula || "";
-            if (typeof formula === "string" && formula.indexOf(OVERLAY_TAG) !== -1) {
-              cf.delete();
-            }
-          } catch (e) {
-            // ignore and continue
-          }
-        });
+      const u1Rows = u1.isNullObject ? 0 : (u1.rowCount || 0);
+      const u1Cols = u1.isNullObject ? 0 : (u1.columnCount || 0);
+      if (u1Rows && u1Cols) {
+        const rect = s1.getRangeByIndexes(0, 0, u1Rows, u1Cols);
+        rect.load(['address']);
+        await context.sync();
+        deletedTotal += await deleteTaggedOverlaysInRange(context, rect, colors);
       }
 
-      purge(customs1);
-      await context.sync();
-      if (msg) msg.textContent = "Overlay removed on source sheet.";
+      if (typeof console !== 'undefined' && console.log) {
+        console.log('Overlay remove: deletedTotal =', deletedTotal);
+      }
+      if (msg) msg.textContent = deletedTotal > 0 ? 'Overlay removed on source sheet.' : 'No overlays found to remove.';
     }).catch((err) => {
-      if (msg) msg.textContent = "Failed to remove overlay: " + String(err && err.message ? err.message : err);
+      if (msg) msg.textContent = 'Failed to remove overlay: ' + String(err && err.message ? err.message : err);
     });
   });
 }
