@@ -9,6 +9,7 @@
 import { buildWorkbookModel } from "../core/model";
 import { saveSnapshot, listSnapshots, getSnapshot } from "../core/snapshot";
 import { parseXlsxToModel } from "../core/import-xlsx";
+import { diffWorkbooks } from "../core/diff";
 
 Office.onReady((info) => {
   if (info.host === Office.HostType.Excel) {
@@ -28,6 +29,7 @@ Office.onReady((info) => {
   wireInspectSnapshot();
   wireUploadBaseline();
   wireInspectUpload();
+  wireRunCrossWorkbookSummary();
   }
 });
 
@@ -570,6 +572,98 @@ function wireInspectUpload() {
     } catch (e) {
       if (msg) msg.textContent = "Failed to write uploaded baseline: " + String(e && e.message ? e.message : e);
     }
+  });
+}
+
+function pickSelectedBaseline() {
+  const snapSel = document.getElementById("baseline-snapshot");
+  const upSel = document.getElementById("baseline-uploaded");
+  const snapId = snapSel ? snapSel.value : "";
+  const upId = upSel ? upSel.value : "";
+  if (upId) {
+    const entry = uploadedBaselines.get(upId);
+    return entry ? { source: "upload", name: entry.name, model: entry.model } : null;
+  }
+  if (snapId) {
+    return { source: "snapshot", id: snapId };
+  }
+  return null;
+}
+
+function wireRunCrossWorkbookSummary() {
+  const btn = document.getElementById("run-xwb-summary");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    const msg = document.getElementById("validation");
+    const choice = pickSelectedBaseline();
+    if (!choice) {
+      if (msg) msg.textContent = "Select a baseline (upload or snapshot) first.";
+      return;
+    }
+    if (msg) msg.textContent = "Building models and computing diff…";
+    try {
+      const current = await buildWorkbookModel({ includeHidden: false, maxCellsPerSheet: 500000 });
+      let baselineModel = null;
+      let baseName = "Baseline";
+      if (choice.source === "upload") {
+        baselineModel = choice.model;
+        baseName = choice.name;
+      } else if (choice.source === "snapshot") {
+        const rec = await getSnapshot(choice.id);
+        if (!rec || !rec.model) throw new Error("Snapshot missing model");
+        baselineModel = rec.model;
+        baseName = rec.name || baseName;
+      }
+      const diff = diffWorkbooks(current, baselineModel);
+      await writeSummaryToLogs(diff, baseName);
+      if (msg) msg.textContent = `Compared against ${baseName}: ${diff.summary.total.changedSheets} changed sheets`;
+    } catch (e) {
+      if (msg) msg.textContent = "Failed to compute diff: " + String(e && e.message ? e.message : e);
+    }
+  });
+}
+
+async function writeSummaryToLogs(diff, baseName) {
+  const ts = new Date().toISOString();
+  const lines = [];
+  lines.push(`[${ts}] Cross-workbook diff summary vs ${baseName}`);
+  lines.push(
+    `Total: +${diff.summary.total.add} / -${diff.summary.total.remove} / value ${diff.summary.total.value} / formula ${diff.summary.total.formula} | changed sheets: ${diff.summary.total.changedSheets}`
+  );
+  const names = Object.keys(diff.bySheet).sort();
+  for (const n of names) {
+    const s = diff.bySheet[n];
+    if (!s || !s.counts) continue;
+    const { add, remove, value, formula, changed } = s.counts;
+    if (changed > 0) {
+      lines.push(`- ${n}: +${add} / -${remove} / value ${value} / formula ${formula}`);
+    } else {
+      lines.push(`- ${n}: unchanged`);
+    }
+  }
+  lines.push("", "----", "");
+
+  await Excel.run(async (context) => {
+    const wb = context.workbook;
+    let logs = wb.worksheets.getItemOrNullObject("logs");
+    logs.load(["name"]);
+    await context.sync();
+    if (logs.isNullObject) {
+      logs = wb.worksheets.add("logs");
+    }
+    const used = logs.getUsedRangeOrNullObject();
+    used.load(["rowCount"]);
+    await context.sync();
+    const startRow = used.isNullObject ? 0 : (used.rowCount || 0);
+    const rng = logs.getRangeByIndexes(startRow, 0, lines.length, 1);
+    rng.values = lines.map((l) => [l]);
+    try {
+      const colA = logs.getRange("A:A");
+      colA.format.columnWidth = 120;
+    } catch (_) {
+      // ignore formatting errors
+    }
+    await context.sync();
   });
 }
 
