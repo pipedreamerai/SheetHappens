@@ -29,7 +29,8 @@
   },
   "dependencies": {
     "core-js": "^3.36.0",
-    "regenerator-runtime": "^0.14.1"
+  "regenerator-runtime": "^0.14.1",
+  "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",

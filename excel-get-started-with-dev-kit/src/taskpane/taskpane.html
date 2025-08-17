@@ -77,6 +77,21 @@
                 </button>
             </div>
 
+            <div class="field-group">
+                <label class="ms-font-m" for="upload-baseline">Upload baseline (.xlsx)</label>
+                <input type="file" id="upload-baseline" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+            </div>
+
+            <div class="field-group">
+                <label class="ms-font-m" for="baseline-uploaded">Baseline (uploads)</label>
+                <select id="baseline-uploaded" class="ms-font-m" aria-label="Uploaded baseline">
+                    <option value="" selected>No uploads yet…</option>
+                </select>
+                <button id="inspect-upload" class="ms-Button action-secondary ml-8">
+                    <span class="ms-Button-label">Inspect upload</span>
+                </button>
+            </div>
+
             <div class="actions">
                 <button id="run-compare" class="ms-Button ms-Button--hero" disabled aria-disabled="true">
                     <span class="ms-Button-label">Run Compare</span>

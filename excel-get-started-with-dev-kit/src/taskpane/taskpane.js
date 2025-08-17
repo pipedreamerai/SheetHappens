@@ -8,6 +8,7 @@
 // eslint-disable-next-line no-unused-vars
 import { buildWorkbookModel } from "../core/model";
 import { saveSnapshot, listSnapshots, getSnapshot } from "../core/snapshot";
+import { parseXlsxToModel } from "../core/import-xlsx";
 
 Office.onReady((info) => {
   if (info.host === Office.HostType.Excel) {
@@ -25,6 +26,8 @@ Office.onReady((info) => {
   wireArchiveSnapshot();
   populateSnapshotDropdown();
   wireInspectSnapshot();
+  wireUploadBaseline();
+  wireInspectUpload();
   }
 });
 
@@ -506,6 +509,66 @@ function wireInspectSnapshot() {
       if (msg) msg.textContent = "Snapshot written to 'logs' sheet.";
     } catch (e) {
       if (msg) msg.textContent = "Failed to inspect snapshot: " + String(e && e.message ? e.message : e);
+    }
+  });
+}
+
+// In-memory stash for uploaded baselines this session
+const uploadedBaselines = new Map(); // id -> { name, model }
+
+function wireUploadBaseline() {
+  const input = document.getElementById("upload-baseline");
+  if (!input) return;
+  input.addEventListener("change", async () => {
+    const msg = document.getElementById("validation");
+    const file = input.files && input.files[0];
+    if (!file) return;
+    if (msg) msg.textContent = "Parsing uploaded workbook…";
+    try {
+      const buf = await file.arrayBuffer();
+      const model = parseXlsxToModel(buf);
+      const id = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      uploadedBaselines.set(id, { name: file.name, model });
+      addUploadedBaselineOption(id, file.name, model);
+      if (msg) msg.textContent = `Uploaded baseline ready (${model.sheets.length} sheets).`;
+    } catch (e) {
+      if (msg) msg.textContent = "Failed to parse upload: " + String(e && e.message ? e.message : e);
+    } finally {
+      input.value = ""; // allow re-uploading same file
+    }
+  });
+}
+
+function addUploadedBaselineOption(id, name, model) {
+  const sel = document.getElementById("baseline-uploaded");
+  if (!sel) return;
+  const opt = document.createElement("option");
+  opt.value = id;
+  opt.text = `${name} (${model.sheets.length} sheets)`;
+  sel.appendChild(opt);
+}
+
+function wireInspectUpload() {
+  const btn = document.getElementById("inspect-upload");
+  const sel = document.getElementById("baseline-uploaded");
+  if (!btn || !sel) return;
+  btn.addEventListener("click", async () => {
+    const msg = document.getElementById("validation");
+    const id = sel.value;
+    if (!id) {
+      if (msg) msg.textContent = "No uploaded baseline selected.";
+      return;
+    }
+    const entry = uploadedBaselines.get(id);
+    if (!entry) {
+      if (msg) msg.textContent = "Uploaded baseline not found in session.";
+      return;
+    }
+    try {
+      await dumpModelToLogsSheet(entry.model);
+      if (msg) msg.textContent = "Uploaded baseline written to 'logs' sheet.";
+    } catch (e) {
+      if (msg) msg.textContent = "Failed to write uploaded baseline: " + String(e && e.message ? e.message : e);
     }
   });
 }
