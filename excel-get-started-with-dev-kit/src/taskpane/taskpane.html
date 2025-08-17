@@ -21,50 +21,27 @@
 </head>
 
 <body class="ms-font-m ms-welcome ms-Fabric">
-    <header class="ms-welcome__header ms-bgColor-neutralLighter">
-        <img width="90" height="90" src="../../assets/logo-filled.png" alt="Logo" title="Logo" />
-        <h1 class="ms-font-su">Compare Sheets</h1>
-    </header>
+    <!-- Header removed per request: no big logo or title -->
     <section id="sideload-msg" class="ms-welcome__main">
         <h2 class="ms-font-xl">Please <a target="_blank" rel="noopener noreferrer" href="https://learn.microsoft.com/office/dev/add-ins/testing/test-debug-office-add-ins#sideload-an-office-add-in-for-testing">sideload</a> your add-in to see app body.</h2>
     </section>
     <main id="app-body" class="ms-welcome__main is-hidden">
-        <div class="compare-container" role="form" aria-label="Compare Sheets">
-            <div class="field-group">
-                <label class="ms-font-m" for="source-sheet">Source sheet</label>
-                <select id="source-sheet" class="ms-font-m" aria-label="Source sheet">
-                    <option value="" selected>Select a sheet…</option>
-                </select>
-            </div>
-            <div class="field-group">
-                <label class="ms-font-m" for="second-sheet">Second sheet</label>
-                <select id="second-sheet" class="ms-font-m" aria-label="Second sheet">
-                    <option value="" selected>Select a sheet…</option>
-                </select>
-            </div>
-
-            <fieldset class="field-group" aria-label="Range mode">
-                <legend class="ms-font-m">Range mode</legend>
-                <label class="ms-font-m">
-                    <input type="radio" name="range-mode" value="used" checked />
-                    Used range of both sheets
-                </label>
-                <label class="ms-font-m">
-                    <input type="radio" name="range-mode" value="selected" />
-                    Selected range
-                </label>
-            </fieldset>
+    <div class="compare-container" role="form" aria-label="Compare Sheets">
 
             <div class="field-group">
-                <label class="ms-font-m" for="dry-run">
-                    <input type="checkbox" id="dry-run" /> Dry run (analyze only)
-                </label>
-            </div>
-
-            <div class="field-group">
-                <button id="archive-snapshot" class="ms-Button">
-                    <span class="ms-Button-label">Archive snapshot</span>
-                </button>
+                <div class="inline-actions">
+                    <button id="archive-snapshot" class="ms-Button third">
+                        <span class="ms-Button-label">Take Snapshot</span>
+                    </button>
+                    <input type="file" id="upload-baseline" class="visually-hidden" aria-label="Upload baseline (.xlsx)" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+                    <button id="choose-upload" class="ms-Button third" type="button">
+                        <span class="ms-Button-label">Choose File</span>
+                    </button>
+                    <button id="clear-baselines" class="ms-Button third" type="button">
+                        <span class="ms-Button-label">Clear Baselines</span>
+                    </button>
+                </div>
+                <div id="clear-baselines-confirm" class="is-hidden" aria-live="polite" aria-atomic="true"></div>
             </div>
 
             <div class="field-group">
@@ -72,51 +49,26 @@
                 <select id="baseline-snapshot" class="ms-font-m" aria-label="Baseline snapshot">
                     <option value="" selected>Select a snapshot…</option>
                 </select>
-                <button id="inspect-snapshot" class="ms-Button action-secondary ml-8">
-                    <span class="ms-Button-label">Inspect snapshot</span>
-                </button>
             </div>
 
-            <div class="field-group">
-                <label class="ms-font-m" for="upload-baseline">Upload baseline (.xlsx)</label>
-                <input type="file" id="upload-baseline" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
-            </div>
+            <!-- Removed separate upload label; file chooser now sits next to snapshot button -->
 
             <div class="field-group">
                 <label class="ms-font-m" for="baseline-uploaded">Baseline (uploads)</label>
                 <select id="baseline-uploaded" class="ms-font-m" aria-label="Uploaded baseline">
                     <option value="" selected>No uploads yet…</option>
                 </select>
-                <button id="inspect-upload" class="ms-Button action-secondary ml-8">
-                    <span class="ms-Button-label">Inspect upload</span>
-                </button>
             </div>
 
             <div class="actions">
-                <button id="run-compare" class="ms-Button ms-Button--hero" disabled aria-disabled="true">
-                    <span class="ms-Button-label">Run Compare</span>
-                </button>
                 <button id="run-xwb-summary" class="ms-Button action-secondary">
-                    <span class="ms-Button-label">Run Cross-Workbook Compare (summary)</span>
-                </button>
-                <button id="reset-tab-colors" class="ms-Button action-secondary">
-                    <span class="ms-Button-label">Reset Tab Colors</span>
-                </button>
-                <button id="apply-overlay" class="ms-Button action-secondary" disabled aria-disabled="true">
-                    <span class="ms-Button-label">Apply Overlay</span>
-                </button>
-                <button id="remove-overlay" class="ms-Button action-secondary" disabled aria-disabled="true">
-                    <span class="ms-Button-label">Remove Overlay</span>
+                    <span class="ms-Button-label">Start Diff</span>
                 </button>
                 <button id="clear-diff-formatting" class="ms-Button action-secondary">
-                    <span class="ms-Button-label">Clear Diff Formatting (current sheet)</span>
-                </button>
-                <button id="dump-model" class="ms-Button action-secondary">
-                    <span class="ms-Button-label">Dump Model (dev)</span>
+                    <span class="ms-Button-label">Stop Diff</span>
                 </button>
             </div>
             <div id="validation" class="validation" aria-live="polite" aria-atomic="true"></div>
-            <div id="dry-run-results" class="ms-font-s" aria-live="polite" aria-atomic="true"></div>
         </div>
     </main>
 </body>

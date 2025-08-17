@@ -117,3 +117,65 @@ select#second-sheet {
 .ml-8 {
     margin-left: 8px;
 }
+
+/* inline actions row for snapshot + upload */
+.inline-actions {
+    display: flex;
+}
+
+.inline-actions .ms-Button.half {
+    -ms-flex: 1 1 0;
+    flex: 1 1 0;
+}
+
+/* Support three equal-width buttons */
+.inline-actions .ms-Button.third {
+    -ms-flex: 1 1 0;
+    flex: 1 1 0;
+}
+
+/* Add spacing to the second action button; an input sits between them so target by id */
+.inline-actions #choose-upload.ms-Button.half {
+    margin-left: 8px;
+}
+
+/* Add spacing for the second and third visible action buttons when using .third */
+.inline-actions #choose-upload.ms-Button.third,
+.inline-actions #clear-baselines.ms-Button.third {
+    margin-left: 8px;
+}
+
+.visually-hidden {
+    position: absolute !important;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap; /* added for better accessibility on Safari */
+    border: 0;
+}
+
+/* Confirmation panel for clearing baselines */
+#clear-baselines-confirm .confirm-panel {
+    margin-top: 8px;
+    padding: 8px;
+    border: 1px solid #e1e1e1;
+    border-radius: 4px;
+    background: #fff8e1; /* light warning */
+}
+
+#clear-baselines-confirm .confirm-text {
+    margin-bottom: 8px;
+    color: #a80000; /* error red */
+}
+
+#clear-baselines-confirm .confirm-actions {
+    display: -ms-flexbox;
+    display: flex;
+}
+
+#clear-baselines-confirm .confirm-actions > * + * {
+    margin-left: 8px;
+}
