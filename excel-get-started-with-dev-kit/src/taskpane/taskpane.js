@@ -7,6 +7,7 @@
 /* global document, Office, Excel, console */
 // eslint-disable-next-line no-unused-vars
 import { buildWorkbookModel } from "../core/model";
+import { saveSnapshot, listSnapshots, getSnapshot } from "../core/snapshot";
 
 Office.onReady((info) => {
   if (info.host === Office.HostType.Excel) {
@@ -21,6 +22,9 @@ Office.onReady((info) => {
   wireRemoveOverlay();
   wireRunCompareDryRun();
   wireDumpModel();
+  wireArchiveSnapshot();
+  populateSnapshotDropdown();
+  wireInspectSnapshot();
   }
 });
 
@@ -439,6 +443,70 @@ function wireDumpModel() {
       .catch((err) => {
         if (msg) msg.textContent = "Failed to build model: " + String(err && err.message ? err.message : err);
       });
+  });
+}
+
+function wireArchiveSnapshot() {
+  const btn = document.getElementById("archive-snapshot");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    const msg = document.getElementById("validation");
+    if (msg) msg.textContent = "Creating snapshot…";
+    try {
+      const model = await buildWorkbookModel({ includeHidden: false, maxCellsPerSheet: 500000 });
+      const name = `Snapshot ${new Date().toLocaleString()}`;
+      const rec = await saveSnapshot(model, { name });
+      await populateSnapshotDropdown();
+      if (msg) msg.textContent = `Snapshot saved (${rec.sheetCount} sheets).`;
+    } catch (e) {
+      if (msg) msg.textContent = "Failed to save snapshot: " + String(e && e.message ? e.message : e);
+    }
+  });
+}
+
+async function populateSnapshotDropdown() {
+  const sel = document.getElementById("baseline-snapshot");
+  if (!sel) return;
+  // Keep the first placeholder
+  while (sel.options.length > 1) sel.remove(1);
+  try {
+    const items = await listSnapshots();
+    items.forEach((it) => {
+      const opt = document.createElement("option");
+      const date = new Date(it.ts).toLocaleString();
+      opt.value = it.id;
+      opt.text = `${date} — ${it.name} (${it.sheetCount} sheets)`;
+      sel.appendChild(opt);
+    });
+  } catch (e) {
+    const msg = document.getElementById("validation");
+    if (msg) msg.textContent = "Failed to load snapshots: " + String(e && e.message ? e.message : e);
+  }
+}
+
+function wireInspectSnapshot() {
+  const btn = document.getElementById("inspect-snapshot");
+  const sel = document.getElementById("baseline-snapshot");
+  if (!btn || !sel) return;
+  btn.addEventListener("click", async () => {
+    const msg = document.getElementById("validation");
+    const id = sel.value;
+    if (!id) {
+      if (msg) msg.textContent = "Select a snapshot to inspect.";
+      return;
+    }
+    if (msg) msg.textContent = "Loading snapshot…";
+    try {
+      const rec = await getSnapshot(id);
+      if (!rec || !rec.model) {
+        if (msg) msg.textContent = "Snapshot not found or has no model.";
+        return;
+      }
+      await dumpModelToLogsSheet(rec.model);
+      if (msg) msg.textContent = "Snapshot written to 'logs' sheet.";
+    } catch (e) {
+      if (msg) msg.textContent = "Failed to inspect snapshot: " + String(e && e.message ? e.message : e);
+    }
   });
 }
 

@@ -114,3 +114,6 @@ select#second-sheet {
     margin-top: 10px;
     color: #a80000;
 }
+.ml-8 {
+    margin-left: 8px;
+}

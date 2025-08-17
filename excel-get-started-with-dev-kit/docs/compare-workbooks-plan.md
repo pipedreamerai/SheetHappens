@@ -67,13 +67,13 @@ Error modes: invalid workbook file, oversized sheets (guardrails), throttling, p
 - Keep current behavior and overlay cleaning. Add a tiny constant module for shared color hexes.
 - Acceptance: Existing green/red/orange/yellow CF still works.
 
-1) feat(model): extract current workbook → WorkbookModel
+1) feat(model): extract current workbook → WorkbookModel (done)
 - Implement `model.js`: read visible sheets, usedRange, values, formulas, valueTypes; cap at N rows/cols via a setting (default unlimited, warn over 50k cells per sheet).
 - Add a dev-only “Dump model” button to log JSON.
 - Acceptance: Small workbook logs correct sizes and a sample of values/formulas.
 - Rollback: delete `model.js` import and button.
 
-2) feat(snapshot): IndexedDB snapshots (JSON)
+2) feat(snapshot): IndexedDB snapshots (JSON) (done)
 - `snapshot.js`: save/load/list/delete snapshots with id, name, ts, label.
 - UI: “Archive snapshot” saves current model; list snapshots in baseline picker.
 - Acceptance: Snapshot appears after click; persists across reloads.
