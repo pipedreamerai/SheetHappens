@@ -106,7 +106,7 @@ Error modes: invalid workbook file, oversized sheets (guardrails), throttling, p
 - Acceptance: Switching sheets applies formatting on demand; Clear removes current sheet’s fills; toggling OFF applies all visible sheets.
 - Rollback: unsubscribe events; keep manual Apply.
 
-7) feat(tabs): sheet tab colors
+7) feat(tabs): sheet tab colors (I think this was already done, please confirm)
 - Compute a per-sheet most-severe category and set `worksheet.tabColor` accordingly.
 - Priority: red > orange > yellow > green > default.
 - Add a “Reset tab colors” action.

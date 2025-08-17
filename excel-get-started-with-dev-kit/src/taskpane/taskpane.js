@@ -4,7 +4,7 @@
  */
 
 /* eslint-disable prettier/prettier, office-addins/load-object-before-read */
-/* global document, Office, Excel, console */
+/* global document, Office, Excel, console, btoa, atob */
 // eslint-disable-next-line no-unused-vars
 import { buildWorkbookModel } from "../core/model";
 import { saveSnapshot, listSnapshots, getSnapshot } from "../core/snapshot";
@@ -31,6 +31,8 @@ Office.onReady((info) => {
   wireInspectUpload();
   wireRunCrossWorkbookSummary();
   wireResetTabColors();
+  initLazyFormatting();
+  wireClearDiffFormatting();
   }
 });
 
@@ -68,7 +70,7 @@ function getSetting(key) {
 // Centralized helper to delete our overlays in a range, using only color-based matching.
 // Runs two internal passes to handle cases where a first delete changes the items collection.
 async function deleteTaggedOverlaysInRange(context, range, colorsSet) {
-  if (!range || range.isNullObject) return 0;
+  if (!range) return 0;
 
   async function onePass() {
     const cfs = range.conditionalFormats;
@@ -102,6 +104,73 @@ async function deleteTaggedOverlaysInRange(context, range, colorsSet) {
     if (typeof console !== 'undefined' && console.warn) console.warn('deleteTaggedOverlaysInRange: pass2 failed', e);
   }
   return total;
+}
+
+// Scan the active sheet for cells with direct fill colors matching our diff palette
+// and clear them. Uses a conservative cap to avoid slow operations on large sheets.
+async function clearDirectFillsByColor(context, ws, colorsSet, maxCells = 0) {
+  const used = ws.getUsedRange(true); // include formatting-only cells
+  used.load(["rowCount", "columnCount"]);
+  await context.sync();
+  const rows = used.rowCount || 0;
+  const cols = used.columnCount || 0;
+  const total = rows * cols;
+  if (!rows || !cols) return { cleared: 0, skipped: false, total: 0 };
+  if (maxCells && total > maxCells) return { cleared: 0, skipped: true, total };
+
+  const addresses = [];
+  // Keep batch size ~<= 5000 cells to limit request size
+  const BATCH_ROWS = Math.max(1, Math.floor(5000 / Math.max(1, cols)));
+
+  for (let r0 = 0; r0 < rows; r0 += BATCH_ROWS) {
+    const r1 = Math.min(rows, r0 + BATCH_ROWS);
+    const rowCells = [];
+    for (let r = r0; r < r1; r++) {
+      const arr = [];
+      for (let c = 0; c < cols; c++) {
+        const cell = ws.getCell(r, c);
+        try { cell.format.fill.load("color"); } catch (_) { /* ignore */ }
+        arr.push(cell);
+      }
+      rowCells.push(arr);
+    }
+  // We intentionally sync per batch to limit payload size; this is a controlled, bounded loop.
+  // eslint-disable-next-line office-addins/no-context-sync-in-loop
+  await context.sync();
+    // Process loaded colors and group contiguous runs per row
+    for (let i = 0; i < rowCells.length; i++) {
+      const r = r0 + i;
+      let c = 0;
+      while (c < cols) {
+        let color = null;
+        try { color = rowCells[i][c].format.fill.color; } catch (_) { color = null; }
+        if (!color || !colorsSet.has(color)) { c++; continue; }
+        let c2 = c;
+        while (c2 + 1 < cols) {
+          let nextColor = null;
+          try { nextColor = rowCells[i][c2 + 1].format.fill.color; } catch (_) { nextColor = null; }
+          if (nextColor && colorsSet.has(nextColor)) c2++;
+          else break;
+        }
+        addresses.push(toA1(r, c, r, c2));
+        c = c2 + 1;
+      }
+    }
+  }
+
+  if (addresses.length) {
+    try {
+      const areas = ws.getRanges(addresses.join(","));
+      try { areas.format.fill.clear(); } catch (_) {
+        for (const a of addresses) { try { ws.getRange(a).format.fill.clear(); } catch (_) { /* ignore */ } }
+      }
+    } catch (_) {
+      for (const a of addresses) { try { ws.getRange(a).format.fill.clear(); } catch (_) { /* ignore */ } }
+    }
+    await context.sync();
+  }
+
+  return { cleared: addresses.length, skipped: false, total };
 }
 
 function quoteSheetName(name) {
@@ -210,15 +279,19 @@ function wireRunCompareDryRun() {
       const s2 = wb.worksheets.getItem(dName);
 
       // Range mode: used range for now
-      const r1 = s1.getUsedRangeOrNullObject();
-      const r2 = s2.getUsedRangeOrNullObject();
-      r1.load(["rowCount", "columnCount"]);
-      r2.load(["rowCount", "columnCount"]);
-      await context.sync();
+  const u1 = s1.getUsedRange();
+  const u2 = s2.getUsedRange();
+  u1.load(['rowCount', 'columnCount']);
+  u2.load(['rowCount', 'columnCount']);
+  await context.sync();
+  const u1Rows = u1.rowCount || 0;
+  const u1Cols = u1.columnCount || 0;
+  const u2Rows = u2.rowCount || 0;
+  const u2Cols = u2.columnCount || 0;
 
       // Normalize size: union bounds
-      const rows = Math.max(r1.isNullObject ? 0 : r1.rowCount || 0, r2.isNullObject ? 0 : r2.rowCount || 0);
-      const cols = Math.max(r1.isNullObject ? 0 : r1.columnCount || 0, r2.isNullObject ? 0 : r2.columnCount || 0);
+      const rows = Math.max(u1Rows, u2Rows);
+      const cols = Math.max(u1Cols, u2Cols);
 
       function getRect(ws, rc, cc) {
         if (!rc || !cc) return null;
@@ -240,9 +313,9 @@ function wireRunCompareDryRun() {
           await context.sync();
           // Clean any existing overlay rules in the target rect (tag or known colors)
           const deleted = await deleteTaggedOverlaysInRange(context, rectSrc, new Set([GREEN_COLOR, RED_COLOR, ORANGE_COLOR, OVERLAY_COLOR]));
-          if (typeof console !== 'undefined' && console.log) {
-            console.log('Presence/absence overlay: pre-clean deleted', deleted, 'items');
-          }
+          await appendLogsInContext(context, [
+            `Presence/absence overlay pre-clean: deleted=${deleted} items in ${rectSrc.address}`
+          ], 'Overlay');
 
           const other = quoteSheetName(dName);
           // Relative A1 reference to the top-left of rectSrc is A1
@@ -273,6 +346,9 @@ function wireRunCompareDryRun() {
           cfY.stopIfTrue = false;
 
           await context.sync();
+          await appendLogsInContext(context, [
+            `Presence/absence overlays applied on ${sName} vs ${dName} in ${rectSrc.address}`
+          ], 'Overlay');
           // Save last overlay rect for precise cleanup later
           try {
             await saveSettingAsync(LAST_OVERLAY_KEY, {
@@ -337,8 +413,8 @@ function wireApplyOverlay() {
     Excel.run(async (context) => {
       const wb = context.workbook;
       const s1 = wb.worksheets.getItem(sName);
-      const r1 = s1.getUsedRangeOrNullObject();
-      r1.load(["address"]);
+  const r1 = s1.getUsedRange();
+  r1.load(["address"]);
       await context.sync();
 
       function addOverlay(range) {
@@ -409,13 +485,11 @@ function wireRemoveOverlay() {
       }
 
       // 2) Sweep the current source used range as a catch-all.
-      const u1 = s1.getUsedRangeOrNullObject();
-      u1.load(['rowCount', 'columnCount']);
-      await context.sync();
-      const u1Rows = u1.isNullObject ? 0 : (u1.rowCount || 0);
-      const u1Cols = u1.isNullObject ? 0 : (u1.columnCount || 0);
-      if (u1Rows && u1Cols) {
-        const rect = s1.getRangeByIndexes(0, 0, u1Rows, u1Cols);
+  const u1 = s1.getUsedRange();
+  u1.load(['rowCount', 'columnCount']);
+  await context.sync();
+      if (u1.rowCount && u1.columnCount) {
+        const rect = s1.getRangeByIndexes(0, 0, u1.rowCount, u1.columnCount);
         rect.load(['address']);
         await context.sync();
         deletedTotal += await deleteTaggedOverlaysInRange(context, rect, colors);
@@ -424,6 +498,9 @@ function wireRemoveOverlay() {
       if (typeof console !== 'undefined' && console.log) {
         console.log('Overlay remove: deletedTotal =', deletedTotal);
       }
+      await appendLogsInContext(context, [
+        `Overlay remove on ${sName}: deletedTotal=${deletedTotal}`
+      ], 'Overlay');
       if (msg) msg.textContent = deletedTotal > 0 ? 'Overlay removed on source sheet.' : 'No overlays found to remove.';
     }).catch((err) => {
       if (msg) msg.textContent = 'Failed to remove overlay: ' + String(err && err.message ? err.message : err);
@@ -617,7 +694,11 @@ function wireRunCrossWorkbookSummary() {
       }
       const diff = diffWorkbooks(current, baselineModel);
   await writeSummaryToLogs(diff, baseName);
+  // Cache diff for lazy per-sheet formatting
+  await cacheDiffForLazyApply(diff);
   await applyTabColors(diff);
+  // Immediately apply formatting for the currently active sheet
+  await applyDiffOnActivation();
       if (msg) msg.textContent = `Compared against ${baseName}: ${diff.summary.total.changedSheets} changed sheets`;
     } catch (e) {
       if (msg) msg.textContent = "Failed to compute diff: " + String(e && e.message ? e.message : e);
@@ -653,10 +734,10 @@ async function writeSummaryToLogs(diff, baseName) {
     if (logs.isNullObject) {
       logs = wb.worksheets.add("logs");
     }
-    const used = logs.getUsedRangeOrNullObject();
-    used.load(["rowCount"]);
-    await context.sync();
-    const startRow = used.isNullObject ? 0 : (used.rowCount || 0);
+  const used = logs.getUsedRange();
+  used.load(["rowCount"]);
+  await context.sync();
+  const startRow = used.rowCount || 0;
     const rng = logs.getRangeByIndexes(startRow, 0, lines.length, 1);
     rng.values = lines.map((l) => [l]);
     try {
@@ -666,6 +747,303 @@ async function writeSummaryToLogs(diff, baseName) {
       // ignore formatting errors
     }
     await context.sync();
+  });
+}
+
+async function logLinesToSheet(lines, header = "Log") {
+  const ts = new Date().toISOString();
+  const payload = [
+    `[${ts}] ${header}`,
+    ...lines,
+    "",
+  ];
+  await Excel.run(async (context) => {
+    const wb = context.workbook;
+    let logs = wb.worksheets.getItemOrNullObject("logs");
+    logs.load(["name"]);
+    await context.sync();
+    if (logs.isNullObject) logs = wb.worksheets.add("logs");
+  const used = logs.getUsedRange();
+  used.load(["rowCount"]);
+  await context.sync();
+  const startRow = used.rowCount || 0;
+    const rng = logs.getRangeByIndexes(startRow, 0, payload.length, 1);
+    rng.values = payload.map((l) => [l]);
+    try { logs.getRange("A:A").format.columnWidth = 120; } catch (_) { /* ignore */ }
+    await context.sync();
+  });
+}
+
+// In-context logger to avoid nested Excel.run; writes lines to the 'logs' sheet using the provided context
+function appendLogsInContext(context, lines, header = "Log") {
+  const ts = new Date().toISOString();
+  const payload = [
+    `[${ts}] ${header}`,
+    ...lines,
+    "",
+  ];
+  const wb = context.workbook;
+  let logs = wb.worksheets.getItemOrNullObject("logs");
+  logs.load(["name"]);
+  // We'll chain the operations after a sync in the caller for reliability
+  return (async () => {
+    await context.sync();
+    if (logs.isNullObject) logs = wb.worksheets.add("logs");
+  const used2 = logs.getUsedRange();
+  used2.load(["rowCount"]);
+  await context.sync();
+  const startRow = used2.rowCount || 0;
+    const rng = logs.getRangeByIndexes(startRow, 0, payload.length, 1);
+    rng.values = payload.map((l) => [l]);
+    try { logs.getRange("A:A").format.columnWidth = 120; } catch (_) { /* ignore */ }
+    await context.sync();
+  })();
+}
+
+// ===== Lazy per-sheet diff formatting =====
+const LAST_DIFF_KEY = 'cc_last_diff_cache_v1';
+const APPLIED_ADDRESSES_KEY = 'cc_applied_addresses_v1';
+let lastDiffMem = null; // in-memory diff for immediate use
+
+async function cacheDiffForLazyApply(diff) {
+  // Store a compact version: bySheet with rows, cols, and a base64 of cells buffer
+  const bySheet = {};
+  for (const [name, s] of Object.entries(diff.bySheet)) {
+    bySheet[name] = {
+      rows: s.rows,
+      cols: s.cols,
+      cells: btoa(String.fromCharCode.apply(null, Array.from(s.cells))),
+    };
+  }
+  // Keep in memory as well
+  lastDiffMem = { bySheet: diff.bySheet };
+  try {
+    const approxBytes = Object.values(bySheet).reduce((sum, v) => sum + v.cells.length, 0);
+    await saveSettingAsync(LAST_DIFF_KEY, { bySheet });
+    await logLinesToSheet([
+      `Cached diff to settings: sheets=${Object.keys(bySheet).length}, approxBytes=${approxBytes}`,
+    ], "Diff Cache");
+  } catch (e) {
+    await logLinesToSheet([
+      `Failed to cache diff to settings: ${String(e && e.message ? e.message : e)}`,
+    ], "Diff Cache Error");
+  }
+  // Reset applied addresses tracking
+  await saveSettingAsync(APPLIED_ADDRESSES_KEY, {});
+}
+
+function restoreCachedDiff() {
+  // Prefer in-memory cache first
+  if (lastDiffMem && lastDiffMem.bySheet) return lastDiffMem;
+  const data = getSetting(LAST_DIFF_KEY);
+  if (!data || !data.bySheet) return null;
+  const bySheet = {};
+  for (const [name, s] of Object.entries(data.bySheet)) {
+    const bin = atob(s.cells);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    bySheet[name] = { rows: s.rows, cols: s.cols, cells: arr };
+  }
+  return { bySheet };
+}
+
+function initLazyFormatting() {
+  // Attach a workbook sheet activation handler; apply formatting for the active sheet if cached diff exists
+  Excel.run(async (context) => {
+    const wb = context.workbook;
+    wb.worksheets.onActivated.add(applyDiffOnActivation);
+    await context.sync();
+    await appendLogsInContext(context, [
+      'Hooked worksheets.onActivated -> applyDiffOnActivation'
+    ], 'Lazy Apply');
+  }).catch(() => {});
+}
+
+async function applyDiffOnActivation() {
+  try {
+    const cached = restoreCachedDiff();
+    if (!cached) {
+      await logLinesToSheet(["No cached diff found; skipping apply"], "Lazy Apply");
+      return;
+    }
+    await Excel.run(async (context) => {
+      const wb = context.workbook;
+      const active = wb.worksheets.getActiveWorksheet();
+      active.load(['name']);
+      await context.sync();
+      const name = active.name;
+      const s = cached.bySheet[name];
+      if (!s) {
+        await appendLogsInContext(context, [`Active sheet '${name}' has no diff entry`], "Lazy Apply");
+        return;
+      }
+      // Build address runs per code and apply
+  const applied = getSetting(APPLIED_ADDRESSES_KEY) || {};
+  const already = applied[name];
+      if (already && already.length) {
+        await appendLogsInContext(context, [`Sheet '${name}' already applied; skipping`], "Lazy Apply");
+        return; // already applied this session
+      }
+      // Pre-clean any custom CF overlays that use our colors
+  const u = active.getUsedRange();
+  u.load(['rowCount','columnCount']);
+  await context.sync();
+  const rows = u.rowCount || 0;
+  const cols = u.columnCount || 0;
+      if (rows && cols) {
+        const rect = active.getRangeByIndexes(0,0,rows,cols);
+        const deleted = await deleteTaggedOverlaysInRange(context, rect, new Set([GREEN_COLOR, RED_COLOR, ORANGE_COLOR, OVERLAY_COLOR]));
+        await appendLogsInContext(context, [`Pre-clean CF deleted=${deleted}, usedRange=${rows}x${cols}`], "Lazy Apply");
+      }
+      const groups = buildAddressGroups(s);
+      const sample = (arr) => arr.slice(0, 8).join(',');
+      await appendLogsInContext(context, [
+        `Applying groups for '${name}': add=${groups.add.length}, remove=${groups.remove.length}, value=${groups.value.length}, formula=${groups.formula.length}`,
+        `Samples — add: ${sample(groups.add)}`,
+        `Samples — remove: ${sample(groups.remove)}`,
+        `Samples — value: ${sample(groups.value)}`,
+        `Samples — formula: ${sample(groups.formula)}`,
+      ], "Lazy Apply");
+      const appliedCounts = await applyGroupsToSheet(context, active, groups, async (msgs, hdr) => appendLogsInContext(context, msgs, hdr));
+      applied[name] = [
+        ...Object.values(groups).flat(),
+      ];
+      await saveSettingAsync(APPLIED_ADDRESSES_KEY, applied);
+      await appendLogsInContext(context, [
+        `Applied ${applied[name].length} ranges to '${name}'`,
+        `Applied counts — add=${appliedCounts.add}, remove=${appliedCounts.remove}, value=${appliedCounts.value}, formula=${appliedCounts.formula}`,
+      ], "Lazy Apply");
+    });
+  } catch (e) {
+    await logLinesToSheet([`Error in lazy apply: ${String(e && e.message ? e.message : e)}`], "Lazy Apply Error");
+  }
+}
+
+function buildAddressGroups(sheetDiff) {
+  // Returns { add: [A1:A3,...], remove: [...], value: [...], formula: [...] }
+  const { rows, cols, cells } = sheetDiff;
+  const out = { add: [], remove: [], value: [], formula: [] };
+  for (let r = 0; r < rows; r++) {
+    let c = 0;
+    while (c < cols) {
+      const idx = r * cols + c;
+      const code = cells[idx];
+      if (!code) { c++; continue; }
+      // extend horizontally for this code
+      let c2 = c;
+      while (c2 + 1 < cols && cells[r * cols + (c2 + 1)] === code) c2++;
+      const addr = toA1(r, c, r, c2);
+      if (code === 1) out.add.push(addr);
+      else if (code === 2) out.remove.push(addr);
+      else if (code === 3) out.value.push(addr);
+      else if (code === 4) out.formula.push(addr);
+      c = c2 + 1;
+    }
+  }
+  return out;
+}
+
+function toA1(r1, c1, r2, c2) {
+  // zero-based to A1; rows add 1
+  function colName(c) {
+    let x = c + 1;
+    let s = '';
+    while (x > 0) {
+      const rem = (x - 1) % 26;
+      s = String.fromCharCode(65 + rem) + s;
+      x = Math.floor((x - 1) / 26);
+    }
+    return s;
+  }
+  return `${colName(c1)}${r1 + 1}:${colName(c2)}${r2 + 1}`;
+}
+
+async function applyGroupsToSheet(context, worksheet, groups, logFn) {
+  // Batch by category
+  const apply = async (addresses, color) => {
+    if (!addresses || addresses.length === 0) return;
+    // Use comma-joined address string for getRanges
+    const joined = addresses.join(',');
+    try {
+      const areas = worksheet.getRanges(joined);
+      areas.format.fill.color = color;
+    } catch (_) {
+      // Fallback: per-address if getRanges(joined) not supported
+      if (logFn) await logFn([`getRanges unsupported; falling back per-address (${addresses.length})`], "Lazy Apply");
+      for (const addr of addresses) {
+        try {
+          const rg = worksheet.getRange(addr);
+          rg.format.fill.color = color;
+        } catch (_) { /* ignore */ }
+      }
+    }
+  };
+  await apply(groups.add, GREEN_COLOR);
+  await apply(groups.remove, RED_COLOR);
+  await apply(groups.value, OVERLAY_COLOR);
+  await apply(groups.formula, ORANGE_COLOR);
+  await context.sync();
+  return {
+    add: groups.add.length,
+    remove: groups.remove.length,
+    value: groups.value.length,
+    formula: groups.formula.length,
+  };
+}
+
+function wireClearDiffFormatting() {
+  const btn = document.getElementById('clear-diff-formatting');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    const msg = document.getElementById('validation');
+    try {
+      await Excel.run(async (context) => {
+        const wb = context.workbook;
+  const ws = wb.worksheets.getActiveWorksheet();
+  ws.load(['name']);
+  await context.sync();
+  const applied = getSetting(APPLIED_ADDRESSES_KEY) || {};
+  const name = ws.name;
+        const addrs = (applied[name] || []);
+        // If we tracked specific addresses, clear fills for those; fallback to color-based cleanup
+        if (addrs.length) {
+          try {
+            // getRanges expects a comma-delimited A1 string, not an array
+            const ranges = ws.getRanges(addrs.join(","));
+            // RangeAreas.format is supported on recent requirement sets; clear if available
+            try { ranges.format.fill.clear(); } catch (_) {
+              // Fallback: per-address clear if RangeAreas.format not supported
+              for (const a of addrs) {
+                try { ws.getRange(a).format.fill.clear(); } catch (_) { /* ignore */ }
+              }
+            }
+          } catch (_) {
+            // Fallback: per-address clear if getRanges is not available/unsupported
+            for (const a of addrs) {
+              try { ws.getRange(a).format.fill.clear(); } catch (_) { /* ignore */ }
+            }
+          }
+        }
+        // Always run color-based conditional format cleanup as a safety net
+  const u = ws.getUsedRange();
+  u.load(['rowCount','columnCount']);
+  await context.sync();
+  const rows = u.rowCount || 0;
+  const cols = u.columnCount || 0;
+        if (rows && cols) {
+          const rect = ws.getRangeByIndexes(0,0,rows,cols);
+          await deleteTaggedOverlaysInRange(context, rect, new Set([GREEN_COLOR, RED_COLOR, ORANGE_COLOR, OVERLAY_COLOR]));
+          // Additionally, clear any direct fills that match our diff colors, even from previous runs
+          try { await clearDirectFillsByColor(context, ws, new Set([GREEN_COLOR, RED_COLOR, ORANGE_COLOR, OVERLAY_COLOR])); } catch (_) { /* ignore */ }
+        }
+        // Remove tracking for this sheet
+        delete applied[name];
+        await saveSettingAsync(APPLIED_ADDRESSES_KEY, applied);
+      });
+      if (msg) msg.textContent = 'Cleared diff formatting for active sheet.';
+    } catch (e) {
+      if (msg) msg.textContent = 'Failed to clear diff formatting: ' + String(e && e.message ? e.message : e);
+    }
   });
 }
 
@@ -745,10 +1123,10 @@ async function dumpModelToLogsSheet(model) {
       // Place at the end (optional)
       logs.position = wb.worksheets.count;
     }
-    const used = logs.getUsedRangeOrNullObject();
-    used.load(["rowCount"]);
+  const used = logs.getUsedRange();
+  used.load(["rowCount"]);
     await context.sync();
-    const startRow = used.isNullObject ? 0 : (used.rowCount || 0);
+  const startRow = used.rowCount || 0;
     if (!lines.length) return;
     const rng = logs.getRangeByIndexes(startRow, 0, lines.length, 1);
     rng.values = lines.map((l) => [l]);
