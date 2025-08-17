@@ -3,7 +3,7 @@
  * See LICENSE in the project root for license information.
  */
 
-/* eslint-disable prettier/prettier, office-addins/load-object-before-read */
+/* eslint-disable prettier/prettier, office-addins/load-object-before-read, office-addins/call-sync-before-read */
 /* global document, Office, Excel, btoa, atob */
 // eslint-disable-next-line no-unused-vars
 import { buildWorkbookModel } from "../core/model";
@@ -91,65 +91,7 @@ async function deleteTaggedOverlaysInRange(context, range, colors) {
   }
 }
 
-// Scans the used range of a worksheet and clears direct fill colors that match any in colors (Set of uppercase hex strings).
-async function clearDirectFillsByColor(context, ws, colors, maxCells = 0) {
-  let cleared = 0;
-  try {
-    const used = ws.getUsedRange();
-    used.load(['rowCount', 'columnCount']);
-    await context.sync();
-    const rows = used.rowCount || 0;
-    const cols = used.columnCount || 0;
-    if (!rows || !cols) return 0;
-    const rowStep = 50;
-    const colStep = 50;
-    let processed = 0;
-    for (let r = 0; r < rows; r += rowStep) {
-      const rCount = Math.min(rowStep, rows - r);
-      for (let c = 0; c < cols; c += colStep) {
-        const cCount = Math.min(colStep, cols - c);
-        const chunk = ws.getRangeByIndexes(r, c, rCount, cCount);
-        const cells = [];
-        for (let rr = 0; rr < rCount; rr++) {
-          for (let cc = 0; cc < cCount; cc++) {
-            const cell = chunk.getCell(rr, cc);
-            cell.load(['address', 'format/fill/color']);
-            cells.push(cell);
-            processed++;
-            if (maxCells > 0 && processed >= maxCells) break;
-          }
-          if (maxCells > 0 && processed >= maxCells) break;
-        }
-        // eslint-disable-next-line office-addins/no-context-sync-in-loop
-        await context.sync();
-        const toClear = [];
-        for (const cell of cells) {
-          try {
-            const col = normalizeColor(cell.format.fill.color);
-            if (col && colors.has(col)) toClear.push(cell.address);
-          } catch (_) { /* ignore */ }
-        }
-        if (toClear.length) {
-          try {
-            const areas = ws.getRanges(toClear.join(','));
-            areas.format.fill.clear();
-          } catch (_) {
-            for (const addr of toClear) {
-              try { ws.getRange(addr).format.fill.clear(); } catch (_) { /* ignore */ }
-            }
-          }
-          // eslint-disable-next-line office-addins/no-context-sync-in-loop
-          await context.sync();
-          cleared += toClear.length;
-        }
-        if (maxCells > 0 && processed >= maxCells) return cleared;
-      }
-    }
-  } catch (_) {
-    // ignore
-  }
-  return cleared;
-}
+// Removed aggressive color-based clearing of direct fills to avoid wiping user formatting.
 
 function wireArchiveSnapshot() {
   const btn = document.getElementById("archive-snapshot");
@@ -440,6 +382,7 @@ function appendLogsInContext(context, lines, header = "Log") {
 // ===== Lazy per-sheet diff formatting =====
 const LAST_DIFF_KEY = 'cc_last_diff_cache_v1';
 const APPLIED_ADDRESSES_KEY = 'cc_applied_addresses_v1';
+const ORIGINAL_FILLS_KEY = 'cc_original_fills_v1'; // per-sheet map of original fills we overwrote
 let lastDiffMem = null; // in-memory diff for immediate use
 let diffEnabled = false; // whether to apply/generate overlays
 
@@ -468,6 +411,8 @@ async function cacheDiffForLazyApply(diff) {
   }
   // Reset applied addresses tracking
   await saveSettingAsync(APPLIED_ADDRESSES_KEY, {});
+  // Reset original fills tracking for a fresh run
+  await saveSettingAsync(ORIGINAL_FILLS_KEY, {});
 }
 
 function restoreCachedDiff() {
@@ -538,6 +483,14 @@ async function applyDiffOnActivation() {
         await appendLogsInContext(context, [`Pre-clean CF deleted=${deleted}, usedRange=${rows}x${cols}`], "Lazy Apply");
       }
       const groups = buildAddressGroups(s);
+      // Snapshot original fills for the addresses we are about to overwrite (only once)
+      const addressesToTouch = [
+        ...groups.add,
+        ...groups.remove,
+        ...groups.value,
+        ...groups.formula,
+      ];
+      await snapshotOriginalFillsForSheet(context, active, name, addressesToTouch);
       const sample = (arr) => arr.slice(0, 8).join(',');
       await appendLogsInContext(context, [
         `Applying groups for '${name}': add=${groups.add.length}, remove=${groups.remove.length}, value=${groups.value.length}, formula=${groups.formula.length}`,
@@ -560,6 +513,47 @@ async function applyDiffOnActivation() {
     await logLinesToSheet([`Error in lazy apply: ${String(e && e.message ? e.message : e)}`], "Lazy Apply Error");
   }
 }
+
+// Snapshot the original fills for a sheet's addresses we are about to overwrite.
+// Stores only addresses with a non-null fill color and that haven't been captured yet.
+/* eslint-disable office-addins/call-sync-before-read */
+async function snapshotOriginalFillsForSheet(context, worksheet, sheetName, addresses) {
+  try {
+    if (!addresses || !addresses.length) return;
+    const orig = getSetting(ORIGINAL_FILLS_KEY) || {};
+    const existing = orig[sheetName] || [];
+    const seen = new Set(existing.map((e) => e.addr));
+    const ranges = [];
+    const addrRefs = [];
+    for (const addr of addresses) {
+      if (seen.has(addr)) continue;
+      // eslint-disable-next-line office-addins/call-sync-before-read
+      const rg = worksheet.getRange(addr);
+      rg.load(['format/fill/color']);
+      ranges.push(rg);
+      addrRefs.push(addr);
+    }
+    if (!ranges.length) return;
+    // eslint-disable-next-line office-addins/no-context-sync-in-loop
+    await context.sync();
+    const toStore = [];
+    for (let i = 0; i < ranges.length; i++) {
+      const rg = ranges[i];
+      try {
+        const col = normalizeColor(rg.format.fill.color);
+        if (col) toStore.push({ addr: addrRefs[i], color: col });
+      } catch (_) { /* ignore */ }
+    }
+    if (toStore.length) {
+      const updated = existing.concat(toStore);
+      orig[sheetName] = updated;
+      await saveSettingAsync(ORIGINAL_FILLS_KEY, orig);
+    }
+  } catch (_) {
+    // best-effort; ignore errors
+  }
+}
+/* eslint-enable office-addins/call-sync-before-read */
 
 function buildAddressGroups(sheetDiff) {
   // Returns { add: [A1:A3,...], remove: [...], value: [...], formula: [...] }
@@ -648,6 +642,7 @@ function wireClearDiffFormatting() {
         wsCol.load("items/name");
         await context.sync();
   const applied = getSetting(APPLIED_ADDRESSES_KEY) || {};
+  const originalFills = getSetting(ORIGINAL_FILLS_KEY) || {};
   const colorSet = new Set([GREEN_COLOR, RED_COLOR, ORANGE_COLOR, OVERLAY_COLOR].map(normalizeColor));
 
         for (const ws of wsCol.items) {
@@ -674,10 +669,20 @@ function wireClearDiffFormatting() {
             if (rows && cols) {
               const rect = ws.getRangeByIndexes(0,0,rows,cols);
               await deleteTaggedOverlaysInRange(context, rect, colorSet);
-              // Clear any direct fills matching our palette, from any prior runs
-              await clearDirectFillsByColor(context, ws, colorSet);
             }
           } catch (_) { /* ignore */ }
+          // Restore any original fills we captured for this sheet
+          const originals = originalFills[ws.name] || [];
+          if (originals.length) {
+            for (const entry of originals) {
+              try {
+                const rg = ws.getRange(entry.addr);
+                rg.format.fill.color = entry.color; // restore exact color
+              } catch (_) { /* ignore */ }
+            }
+          }
+          // Ensure worksheet gridlines are visible again after clearing fills
+          try { ws.showGridlines = true; } catch (_) { /* ignore if not supported */ }
           // Clear tab color
           try { ws.tabColor = null; } catch (_) { /* ignore */ }
         }
@@ -687,6 +692,7 @@ function wireClearDiffFormatting() {
         for (const ws of wsCol.items) { try { ws.tabColor = ""; } catch (_) { /* ignore */ } }
         // Wipe all tracking
         await saveSettingAsync(APPLIED_ADDRESSES_KEY, {});
+        await saveSettingAsync(ORIGINAL_FILLS_KEY, {});
       });
       if (msg) msg.textContent = 'Cleared diff formatting on all sheets.';
     } catch (e) {
