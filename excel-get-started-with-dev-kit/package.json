@@ -25,6 +25,7 @@
     "start:web": "office-addin-debugging start manifest.xml web",
     "stop": "office-addin-debugging stop manifest.xml",
     "validate": "office-addin-manifest validate manifest.xml",
+    "dev": "concurrently --kill-others-on-fail -n server,excel -c green,blue \"npm:dev-server\" \"npm:start:desktop\"",
     "watch": "webpack --mode development --watch"
   },
   "dependencies": {
@@ -55,7 +56,8 @@
     "source-map-loader": "^5.0.0",
     "webpack": "^5.90.3",
     "webpack-cli": "^5.1.4",
-    "webpack-dev-server": "^5.2.2"
+    "webpack-dev-server": "^5.2.2",
+    "concurrently": "^9.0.1"
   },
   "prettier": "office-addin-prettier-config",
   "browserslist": [
