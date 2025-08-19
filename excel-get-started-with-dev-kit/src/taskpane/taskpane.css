@@ -105,3 +105,8 @@ select#second-sheet {
 .actions {
     margin-top: 10px;
 }
+
+.validation {
+    margin-top: 10px;
+    color: #a80000;
+}
