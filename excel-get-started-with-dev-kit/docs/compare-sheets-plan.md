@@ -157,11 +157,11 @@ Apply rules in this order per cell pair:
 5) Create and Clear Overlays (done)
   - Implement a working "Apply Overlay" and "Clear overlay" in cells with content
   - Test: Manually fill some cells, click overlay, it appears. Click "clear", fills are restored.
-6) Bulk read plumbing (dry run)
+6) Bulk read plumbing (dry run) (done)
   - Read values, formulas, numberFormat, text, valueTypes for the computed range; do not format yet.
   - Show counts in pane (cells, formulas, blanks) and enable a "Dry run" toggle.
   - Test: Run shows stats; Dry run produces no formatting.
-7) Presence/absence rules (Green/Red)
+7) Presence/absence rules (Green/Red) (done)
   - Implement green/red for src-only and dst-only content; respect Selected/Used range and chunking.
   - Test: Differences highlight green/red; progress bar advances; Cancel stops cleanly.
 8) Hardcoded value differences (Orange)
