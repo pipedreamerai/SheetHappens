@@ -17,6 +17,7 @@ Office.onReady((info) => {
   // Wire overlay actions.
   wireApplyOverlay();
   wireRemoveOverlay();
+  wireRunCompareDryRun();
   }
 });
 
@@ -97,6 +98,86 @@ function initSheetDropdowns() {
     validate();
   }).catch((err) => {
     if (msg) msg.textContent = "Unable to enumerate worksheets: " + String(err && err.message ? err.message : err);
+  });
+}
+
+function wireRunCompareDryRun() {
+  const runBtn = document.getElementById("run-compare");
+  if (!runBtn) return;
+  runBtn.addEventListener("click", () => {
+    const srcSel = document.getElementById("source-sheet");
+    const dstSel = document.getElementById("second-sheet");
+    const dry = document.getElementById("dry-run");
+    const results = document.getElementById("dry-run-results");
+    const msg = document.getElementById("validation");
+    const sName = srcSel && srcSel.value ? srcSel.value : "";
+    const dName = dstSel && dstSel.value ? dstSel.value : "";
+    const doDryRun = dry && dry.checked;
+    if (!(sName && dName) || sName === dName) {
+      if (msg) msg.textContent = "Please select two different sheets.";
+      return;
+    }
+    Excel.run(async (context) => {
+      if (results) results.textContent = "";
+      if (msg) msg.textContent = "";
+      const wb = context.workbook;
+      const s1 = wb.worksheets.getItem(sName);
+      const s2 = wb.worksheets.getItem(dName);
+
+      // Range mode: used range for now
+      const r1 = s1.getUsedRangeOrNullObject();
+      const r2 = s2.getUsedRangeOrNullObject();
+      r1.load(["rowCount", "columnCount"]);
+      r2.load(["rowCount", "columnCount"]);
+      await context.sync();
+
+      // Normalize size: union bounds
+      const rows = Math.max(r1.isNullObject ? 0 : r1.rowCount || 0, r2.isNullObject ? 0 : r2.rowCount || 0);
+      const cols = Math.max(r1.isNullObject ? 0 : r1.columnCount || 0, r2.isNullObject ? 0 : r2.columnCount || 0);
+
+      function getRect(ws, rc, cc) {
+        if (!rc || !cc) return null;
+        return ws.getRangeByIndexes(0, 0, rc, cc);
+      }
+
+      const rect1 = getRect(s1, rows, cols);
+      const rect2 = getRect(s2, rows, cols);
+      if (rect1) rect1.load(["values", "formulas", "numberFormat", "text", "valueTypes"]);
+      if (rect2) rect2.load(["values", "formulas", "numberFormat", "text", "valueTypes"]);
+      await context.sync();
+
+      if (!doDryRun) {
+        if (msg) msg.textContent = "Dry run is off. No formatting yet in this step.";
+        return;
+      }
+
+      // Compute lightweight counts
+      function countStats(r) {
+        if (!r) return { cells: 0, blanks: 0, formulas: 0 };
+        const vals = r.values || [];
+        const forms = r.formulas || [];
+        let cells = 0, blanks = 0, formulas = 0;
+        for (let i = 0; i < vals.length; i++) {
+          for (let j = 0; j < (vals[i] ? vals[i].length : 0); j++) {
+            cells++;
+            const v = vals[i][j];
+            const f = forms[i] && forms[i][j];
+            const hasFormula = typeof f === "string" && f.startsWith("=");
+            if (hasFormula) formulas++;
+            const isBlank = (!hasFormula) && (v === null || v === "");
+            if (isBlank) blanks++;
+          }
+        }
+        return { cells, blanks, formulas };
+      }
+
+      const s1Stats = rect1 ? countStats(rect1) : { cells: 0, blanks: 0, formulas: 0 };
+      const s2Stats = rect2 ? countStats(rect2) : { cells: 0, blanks: 0, formulas: 0 };
+      const summary = `Dry run — Rows x Cols: ${rows} x ${cols}. Source: ${s1Stats.cells} cells (${s1Stats.formulas} formulas, ${s1Stats.blanks} blanks). Second: ${s2Stats.cells} cells (${s2Stats.formulas} formulas, ${s2Stats.blanks} blanks).`;
+      if (results) results.textContent = summary;
+    }).catch((err) => {
+      if (msg) msg.textContent = "Failed to run dry run: " + String(err && err.message ? err.message : err);
+    });
   });
 }
 

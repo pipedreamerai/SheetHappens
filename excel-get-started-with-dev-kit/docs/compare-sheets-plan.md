@@ -154,9 +154,9 @@ Apply rules in this order per cell pair:
 3) Populate worksheet dropdowns (done)
   - Enumerate workbook sheets and populate both dropdowns; prevent picking the same sheet twice.
   - Test: Sheets appear; selecting the same sheet shows a validation message.
-5) Clear Highlights (in selection)
-  - Implement a working "Clear Highlights" that clears fills in the computed range(s).
-  - Test: Manually fill some cells, click Clear, fills are removed.
+5) Create and Clear Overlays (done)
+  - Implement a working "Apply Overlay" and "Clear overlay" in cells with content
+  - Test: Manually fill some cells, click overlay, it appears. Click "clear", fills are restored.
 6) Bulk read plumbing (dry run)
   - Read values, formulas, numberFormat, text, valueTypes for the computed range; do not format yet.
   - Show counts in pane (cells, formulas, blanks) and enable a "Dry run" toggle.
