@@ -25,6 +25,7 @@ const OVERLAY_TAG = 'CC_OVERLAY';
 const OVERLAY_COLOR = '#FFF2CC'; // soft yellow as example overlay color
 const GREEN_COLOR = '#C6EFCE';
 const RED_COLOR = '#FFC7CE';
+const ORANGE_COLOR = '#FFA500';
 
 // Persist last overlay rect so we can precisely clear even if usedRange changes later.
 const LAST_OVERLAY_KEY = 'cc_last_overlay_meta_v1';
@@ -51,52 +52,43 @@ function getSetting(key) {
   }
 }
 
-// Centralized helper to delete our tagged conditional formats in a range.
+// Centralized helper to delete our overlays in a range, using only color-based matching.
+// Runs two internal passes to handle cases where a first delete changes the items collection.
 async function deleteTaggedOverlaysInRange(context, range, colorsSet) {
   if (!range || range.isNullObject) return 0;
-  const cfs = range.conditionalFormats;
-  // Load types to filter custom formats first.
-  cfs.load('items/type');
-  await context.sync();
 
-  let customItems = cfs.items.filter((cf) => cf.type === Excel.ConditionalFormatType.custom);
-  let toDelete = [];
-
-  // Attempt formula-tag-based selection first.
-  try {
-    customItems.forEach((cf) => cf.custom.rule.load('formula'));
+  async function onePass() {
+    const cfs = range.conditionalFormats;
+    // Load types to filter custom formats
+    cfs.load('items/type');
     await context.sync();
-    toDelete = customItems.filter((cf) => {
-      const formula = (cf.custom && cf.custom.rule && cf.custom.rule.formula) || '';
-      return typeof formula === 'string' && formula.indexOf(OVERLAY_TAG) !== -1;
+    const customItems = (cfs.items || []).filter((cf) => cf.type === Excel.ConditionalFormatType.custom);
+    if (!customItems.length) return 0;
+    // Load fill colors
+    customItems.forEach((cf) => {
+      try { cf.custom.format.fill.load('color'); } catch (_) { /* ignore */ }
     });
-  } catch (e) {
-    // Known intermittent issue on some platforms when reading custom.rule.formula (0x8002000b);
-    // fall back to color matching to avoid hard failure.
-    if (typeof console !== 'undefined' && console.warn) {
-      console.warn('deleteTaggedOverlaysInRange: formula read failed; falling back to color filter', e);
-    }
-    try {
-      customItems.forEach((cf) => cf.custom.format.fill.load('color'));
-      await context.sync();
-      toDelete = customItems.filter((cf) => {
-        const color = (cf.custom && cf.custom.format && cf.custom.format.fill && cf.custom.format.fill.color) || '';
+    await context.sync();
+    const toDelete = customItems.filter((cf) => {
+      try {
+        const color = cf.custom && cf.custom.format && cf.custom.format.fill && cf.custom.format.fill.color;
         return typeof color === 'string' && colorsSet.has(color);
-      });
-    } catch (e2) {
-      if (typeof console !== 'undefined' && console.warn) {
-        console.warn('deleteTaggedOverlaysInRange: color read also failed; skipping delete in this range', e2);
-      }
-      return 0;
-    }
+      } catch (_) { return false; }
+    });
+    toDelete.forEach((cf) => { try { cf.delete(); } catch (_) { /* ignore */ } });
+    await context.sync();
+    return toDelete.length;
   }
 
-  // Perform deletions.
-  toDelete.forEach((cf) => {
-    try { cf.delete(); } catch (_) { /* no-op */ }
-  });
-  await context.sync();
-  return toDelete.length;
+  let total = 0;
+  try { total += await onePass(); } catch (e) {
+    if (typeof console !== 'undefined' && console.warn) console.warn('deleteTaggedOverlaysInRange: pass1 failed', e);
+  }
+  // Second pass in case the collection changed after deletions (avoids double-click behavior)
+  try { total += await onePass(); } catch (e) {
+    if (typeof console !== 'undefined' && console.warn) console.warn('deleteTaggedOverlaysInRange: pass2 failed', e);
+  }
+  return total;
 }
 
 function quoteSheetName(name) {
@@ -234,7 +226,7 @@ function wireRunCompareDryRun() {
           rectSrc.load(['address']);
           await context.sync();
           // Clean any existing overlay rules in the target rect (tag or known colors)
-          const deleted = await deleteTaggedOverlaysInRange(context, rectSrc, new Set([GREEN_COLOR, RED_COLOR, OVERLAY_COLOR]));
+          const deleted = await deleteTaggedOverlaysInRange(context, rectSrc, new Set([GREEN_COLOR, RED_COLOR, ORANGE_COLOR, OVERLAY_COLOR]));
           if (typeof console !== 'undefined' && console.log) {
             console.log('Presence/absence overlay: pre-clean deleted', deleted, 'items');
           }
@@ -251,6 +243,22 @@ function wireRunCompareDryRun() {
           cfR.custom.rule.formula = formulaRed;
           cfR.custom.format.fill.color = RED_COLOR;
           cfR.stopIfTrue = false;
+
+          // Commit 8 (revised): Orange for any differing values (including formulas), excluding the yellow case where formula text matches.
+          // Rule: both cells non-blank and values differ, but not when both are formulas with identical FORMULATEXT.
+          const formulaOrange = `AND(NOT(ISBLANK(A1)), NOT(ISBLANK(${other}!A1)), A1<>${other}!A1, NOT(AND(ISFORMULA(A1), ISFORMULA(${other}!A1), UPPER(TRIM(IFERROR(FORMULATEXT(A1),"")))=UPPER(TRIM(IFERROR(FORMULATEXT(${other}!A1),""))))), N("${OVERLAY_TAG}")=0)`;
+          const cfO = rectSrc.conditionalFormats.add(Excel.ConditionalFormatType.custom);
+          cfO.custom.rule.formula = formulaOrange;
+          cfO.custom.format.fill.color = ORANGE_COLOR;
+          cfO.stopIfTrue = false;
+
+          // Commit 9: Yellow for same formula text but different results
+          const formulaYellow = `AND(ISFORMULA(A1), ISFORMULA(${other}!A1), UPPER(TRIM(IFERROR(FORMULATEXT(A1),"")))=UPPER(TRIM(IFERROR(FORMULATEXT(${other}!A1),""))), A1<>${other}!A1, N("${OVERLAY_TAG}")=0)`;
+          const cfY = rectSrc.conditionalFormats.add(Excel.ConditionalFormatType.custom);
+          cfY.custom.rule.formula = formulaYellow;
+          cfY.custom.format.fill.color = OVERLAY_COLOR; // light yellow
+          cfY.stopIfTrue = false;
+
           await context.sync();
           // Save last overlay rect for precise cleanup later
           try {
@@ -369,8 +377,8 @@ function wireRemoveOverlay() {
       const wb = context.workbook;
       const s1 = wb.worksheets.getItem(sName);
 
-      let deletedTotal = 0;
-      const colors = new Set([GREEN_COLOR, RED_COLOR, OVERLAY_COLOR]);
+    let deletedTotal = 0;
+  const colors = new Set([GREEN_COLOR, RED_COLOR, ORANGE_COLOR, OVERLAY_COLOR]);
 
       // 1) Prefer the exact last overlay rect if available and still valid.
       const meta = getSetting(LAST_OVERLAY_KEY);

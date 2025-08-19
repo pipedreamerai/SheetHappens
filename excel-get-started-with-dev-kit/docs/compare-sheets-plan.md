@@ -164,15 +164,13 @@ Apply rules in this order per cell pair:
 7) Presence/absence rules (Green/Red) (done)
   - Implement green/red for src-only and dst-only content; respect Selected/Used range and chunking.
   - Test: Differences highlight green/red; progress bar advances; Cancel stops cleanly.
-8) Hardcoded value differences (Orange)
+8) Hardcoded value differences (Orange) (done)
   - Implement non-formula value comparison with options (ignore case, trim, numeric tolerance).
   - Test: Create mismatched values; toggling options changes results as expected.
-9) Same formula, different result (Yellow)
+9) Same formula, different result (Yellow) (done)
   - Implement formula normalization and result comparison; highlight yellow when formulas match but values differ.
   - Test: Same formula text producing different values highlights yellow.
-10) Format-only differences (Light blue)
-  - Implement detection where values equal but numberFormat differs; add displayed-text comparison option.
-  - Test: 0.5 vs 50% lights blue; switching to displayed-text mode removes the difference if texts match.
+10) SKIPPING
 11) RangeAreas batching + fallback
   - Apply highlights using RangeAreas when supported; fallback to coalesced contiguous ranges.
   - Test: Large selections apply quickly; verify behavior on platforms lacking RangeAreas.
