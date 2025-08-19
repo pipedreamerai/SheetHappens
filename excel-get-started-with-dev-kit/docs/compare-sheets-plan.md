@@ -151,12 +151,9 @@ Apply rules in this order per cell pair:
 2) Basic task pane UI shell (done)
   - Add dropdowns for Source/Second sheets, range mode toggles, and disabled "Run Compare" button.
   - Test: UI renders; Run button is disabled until valid selections.
-3) Populate worksheet dropdowns
+3) Populate worksheet dropdowns (done)
   - Enumerate workbook sheets and populate both dropdowns; prevent picking the same sheet twice.
   - Test: Sheets appear; selecting the same sheet shows a validation message.
-4) Range mode and preview
-  - Implement Used vs Selected range discovery; display a read-only preview of the computed addresses for both sheets.
-  - Test: Switch modes and verify preview updates; selection on sheet changes preview.
 5) Clear Highlights (in selection)
   - Implement a working "Clear Highlights" that clears fills in the computed range(s).
   - Test: Manually fill some cells, click Clear, fills are removed.
