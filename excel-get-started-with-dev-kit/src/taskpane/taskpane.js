@@ -10,6 +10,7 @@ import { buildWorkbookModel } from "../core/model";
 import { saveSnapshot, listSnapshotsByWorkbook, getSnapshot, deleteSnapshot } from "../core/snapshot";
 import { parseXlsxToModel } from "../core/import-xlsx";
 import { diffWorkbooks } from "../core/diff";
+import { isCompressedExportSupported, getWorkbookNameSafe, buildArchiveFilename } from "../core/archive";
 
 // Diff colors and overlay tag used for identification/cleanup
 const OVERLAY_COLOR = '#FFF2CC'; // yellow
@@ -831,6 +832,18 @@ Office.onReady(() => {
         `Host=${host}, Platform=${platform}, Version=${ver}`,
         `ExcelApi support: 1.2=${rs12}, 1.4=${rs14}, 1.7=${rs17}, 1.9=${rs19}`,
       ], 'Startup');
+      // Archive capability probe: log support and a sample filename to verify our helpers are wired.
+      (async () => {
+        try {
+          const supported = isCompressedExportSupported(); // true when Compressed export is available
+          const wbName = await getWorkbookNameSafe(); // resolves a friendly workbook name
+          const sample = buildArchiveFilename(wbName); // builds `<Name>_YYYYMMDD_HHMMSS.xlsx`
+          await logLinesToSheet([
+            `Archive: compressedExportSupported=${supported}`,
+            `Archive: sampleFilename=${sample}`,
+          ], 'Archive Capability');
+        } catch (_) { /* ignore probe errors */ }
+      })();
     } catch (_) { /* ignore banner log errors */ }
     wireArchiveSnapshot();
     populateSnapshotDropdown();
