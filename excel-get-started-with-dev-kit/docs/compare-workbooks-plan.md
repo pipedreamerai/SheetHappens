@@ -79,13 +79,13 @@ Error modes: invalid workbook file, oversized sheets (guardrails), throttling, p
 - Acceptance: Snapshot appears after click; persists across reloads.
 - Rollback: hide button and ignore IndexedDB if unavailable.
 
-3) feat(import): upload .xlsx baseline (SheetJS)
+3) feat(import): upload .xlsx baseline (SheetJS) (done)
 - Add `xlsx` dependency; file input → ArrayBuffer → WorkbookModel.
 - Normalize used ranges (infer max rows/cols from non-empty cells).
 - Acceptance: Upload test file; see sheets in picker with row/col counts.
 - Rollback: hide upload; feature flag in settings.
 
-4) feat(diff): pure diff engine
+4) feat(diff): pure diff engine (done)
 - `diff.js`: compare two WorkbookModels by sheet name.
 - Cell rules: compute add/remove and value/formula-change using valueTypes, trimmed strings, and exact formula-text compare (case/whitespace-insensitive using TRIM+UPPER equivalent in JS).
 - Output counts and sheetStatus (added/removed/modified/unchanged).
