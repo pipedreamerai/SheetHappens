@@ -351,17 +351,12 @@ function wireRunCrossWorkbookSummary() {
     `Compare start: baseline='${baseName}', sheets=${Object.keys(diff.bySheet||{}).length}, backend=CF-only`
   ], 'Compare');
   diffEnabled = true;
+  // Keep baseline model available for selection callouts
+  lastBaselineModelMem = baselineModel;
   await logLinesToSheet([`Compare marker: before applyTabColors`], 'Compare');
   await applyTabColors(diff);
   // Immediately apply formatting for the currently active sheet
   await logLinesToSheet([`Compare marker: before applyDiffOnActivation`], 'Compare');
-  // Run a smoke CF test on the current active sheet before lazy apply
-  try {
-    await Excel.run(async (context) => {
-      const ws = context.workbook.worksheets.getActiveWorksheet();
-      await cfSmokeTest(context, ws);
-    });
-  } catch (_) { /* ignore */ }
   await applyDiffOnActivation();
       if (msg) msg.textContent = `Compared against ${baseName}: ${diff.summary.total.changedSheets} changed sheets`;
     } catch (e) {
@@ -444,6 +439,11 @@ const APPLIED_ADDRESSES_KEY = 'cc_applied_addresses_v1';
 const ORIGINAL_FILLS_KEY = 'cc_original_fills_v1'; // per-sheet map of original fills we overwrote
 let lastDiffMem = null; // in-memory diff for immediate use
 let diffEnabled = false; // whether to apply/generate overlays
+// Retain baseline model in memory for selection callouts
+let lastBaselineModelMem = null;
+// Track an active callout so we can clear it on selection changes
+let activeCallout = { sheetName: null, address: null, weAddedValidation: false };
+let selectionHandlerRef = null; // EventHandler removal token
 
 async function cacheDiffForLazyApply(diff) {
   // Store a compact version: bySheet with rows, cols, and a base64 of cells buffer
@@ -524,8 +524,6 @@ async function applyDiffOnActivation() {
       await appendLogsInContext(context, [
         `Lazy Apply: active='${name}'`
       ], 'Lazy Apply 3');
-      // Run CF smoke test once per activation to validate host capabilities
-      await cfSmokeTest(context, active);
       const s = cached.bySheet[name];
       if (!s) {
         await appendLogsInContext(context, [`Active sheet '${name}' has no diff entry`], "Lazy Apply 4");
@@ -752,6 +750,8 @@ function wireClearDiffFormatting() {
         const wsCol = wb.worksheets;
         wsCol.load("items/name");
         await context.sync();
+        // Clear any active selection callout
+        try { await clearActiveCallout(); } catch (_) {}
   const applied = getSetting(APPLIED_ADDRESSES_KEY) || {};
   const originalFills = getSetting(ORIGINAL_FILLS_KEY) || {};
   const colorSet = new Set([GREEN_COLOR, RED_COLOR, ORANGE_COLOR, OVERLAY_COLOR].map(normalizeColor));
@@ -771,7 +771,7 @@ function wireClearDiffFormatting() {
                 } catch (_) { /* ignore */ }
               }
             }
-            // Also sweep used range to catch any residuals (e.g., smoke test on A1)
+            // Also sweep used range to catch any residual overlays
             try {
               const u = ws.getUsedRange();
               u.load(['rowCount','columnCount']);
@@ -783,11 +783,6 @@ function wireClearDiffFormatting() {
                 const rect = ws.getRangeByIndexes(0,0,rows,cols);
                 totalDeleted += await deleteTaggedOverlaysInRange(context, rect, colorSet, { matchRuleTypes: true });
               }
-            } catch (_) { /* ignore */ }
-            // Explicitly clear A1 (smoke test) with a narrow, brutal pass
-            try {
-              const a1 = ws.getRange('A1:A1');
-              totalDeleted += await deleteTaggedOverlaysInRange(context, a1, colorSet, { matchRuleTypes: true, brutal: true });
             } catch (_) { /* ignore */ }
             try { await appendLogsInContext(context, [`${ws.name}: Deleted ${totalDeleted} conditional-format overlays (targeted+usedRange)`], "Stop Diff"); } catch (_) {}
           } catch (_) { /* ignore */ }
@@ -884,6 +879,7 @@ Office.onReady(() => {
     wireUploadBaseline();
   wireRunCrossWorkbookSummary();
     initLazyFormatting();
+    initSelectionCallouts();
     wireClearDiffFormatting();
   wireClearBaselines();
   } catch (e) {
@@ -891,24 +887,179 @@ Office.onReady(() => {
   }
 });
 
-// Simple CF smoke test on A1 to validate host supports CF add/format
-async function cfSmokeTest(context, worksheet) {
+// ===== Selection callout (New/Old) =====
+function initSelectionCallouts() {
   try {
-    const rng = worksheet.getRange('A1:A1');
-    const cfs = rng.conditionalFormats;
-    const cf = cfs.add(Excel.ConditionalFormatType.custom);
-    cf.custom.rule.formula = '=TRUE';
-    try { cf.custom.format.fill.setSolidColor(OVERLAY_COLOR); }
-    catch (_) { try { cf.custom.format.fill.color = OVERLAY_COLOR; } catch (_) { try { cf.format.fill.color = OVERLAY_COLOR; } catch (_) { /* ignore */ } } }
-    cfs.load('items/type');
-    await context.sync();
-    const types = (cfs.items || []).map((it) => it.type).join(',');
-    await appendLogsInContext(context, [
-      `CF smoke: added custom CF to A1, count=${(cfs.items||[]).length}, types=${types}`
-    ], 'CF Smoke');
-  } catch (e) {
-    await appendLogsInContext(context, [
-      `CF smoke: failed on A1: ${String(e && e.message ? e.message : e)}`
-    ], 'CF Smoke');
+    Excel.run(async (context) => {
+      const wb = context.workbook;
+      async function wireActiveSheetSelection() {
+        const active = wb.worksheets.getActiveWorksheet();
+        active.load(["name"]);
+        await context.sync();
+        try {
+          if (selectionHandlerRef && selectionHandlerRef.remove) {
+            await selectionHandlerRef.remove();
+          }
+        } catch (_) { /* ignore remove errors */ }
+        selectionHandlerRef = active.onSelectionChanged.add(async (event) => {
+          try { await handleSelectionChanged(event); } catch (_) { /* ignore */ }
+        });
+        await context.sync();
+      }
+      // Wire now and on subsequent activations
+      await wireActiveSheetSelection();
+      wb.worksheets.onActivated.add(async () => { try { await handleActivationForSelection(); } catch (_) {} });
+      await context.sync();
+    }).catch(() => {});
+  } catch (_) { /* ignore */ }
+}
+
+async function handleActivationForSelection() {
+  try {
+    await Excel.run(async (context) => {
+      const wb = context.workbook;
+      const active = wb.worksheets.getActiveWorksheet();
+      active.load(["name"]);
+      await context.sync();
+      try { if (selectionHandlerRef && selectionHandlerRef.remove) await selectionHandlerRef.remove(); } catch (_) {}
+      selectionHandlerRef = active.onSelectionChanged.add(async (event) => {
+        try { await handleSelectionChanged(event); } catch (_) { /* ignore */ }
+      });
+      await context.sync();
+    });
+  } catch (_) { /* ignore */ }
+}
+
+function parseA1ToZeroBased(addr) {
+  // Accept forms like 'A1' only. Returns { row, col } zero-based or null
+  if (!addr || typeof addr !== 'string') return null;
+  const simple = addr.trim().toUpperCase();
+  // Reject ranges
+  if (simple.indexOf(':') !== -1) return null;
+  // Remove any sheet qualifier if present (e.g., 'Sheet1!A1')
+  const excl = simple.lastIndexOf('!');
+  const a = excl >= 0 ? simple.slice(excl + 1) : simple;
+  const m = /^([A-Z]+)(\d+)$/.exec(a);
+  if (!m) return null;
+  const colLetters = m[1];
+  const rowNum = parseInt(m[2], 10);
+  if (!rowNum || rowNum < 1) return null;
+  let colNum = 0;
+  for (let i = 0; i < colLetters.length; i++) {
+    colNum = colNum * 26 + (colLetters.charCodeAt(i) - 64);
+  }
+  return { row: rowNum - 1, col: colNum - 1 };
+}
+
+function getBaselineCellValue(sheetName, r, c) {
+  try {
+    if (!lastBaselineModelMem) return { v: null, f: null, t: 'Empty' };
+    const sh = (lastBaselineModelMem.sheets || []).find((s) => s && s.name === sheetName);
+    if (!sh) return { v: null, f: null, t: 'Empty' };
+    if (r >= (sh.rowCount || 0) || c >= (sh.columnCount || 0)) return { v: null, f: null, t: 'Empty' };
+    const v = sh.values && sh.values[r] ? sh.values[r][c] : null;
+    const f = sh.formulas && sh.formulas[r] ? sh.formulas[r][c] : null;
+    const t = sh.valueTypes && sh.valueTypes[r] ? (sh.valueTypes[r][c] || 'Empty') : 'Empty';
+    return { v, f, t };
+  } catch (_) {
+    return { v: null, f: null, t: 'Empty' };
   }
 }
+
+function formatValueForDisplay(cell) {
+  if (!cell) return '';
+  const f = typeof cell.f === 'string' && cell.f ? cell.f : null;
+  if (f && f.startsWith('=')) return f;
+  if (cell.v == null) return '';
+  return String(cell.v);
+}
+
+async function clearActiveCallout() {
+  try {
+    if (!activeCallout || !activeCallout.sheetName || !activeCallout.address) return;
+    await Excel.run(async (context) => {
+      const ws = context.workbook.worksheets.getItem(activeCallout.sheetName);
+      const rg = ws.getRange(activeCallout.address);
+      try {
+        if (activeCallout.weAddedValidation && rg.dataValidation && rg.dataValidation.clear) {
+          rg.dataValidation.clear();
+        }
+      } catch (_) { /* ignore */ }
+      await context.sync();
+    });
+  } catch (_) { /* ignore */ }
+  activeCallout = { sheetName: null, address: null, weAddedValidation: false };
+}
+
+async function handleSelectionChanged(event) {
+  try {
+    if (!diffEnabled) return;
+    const cached = restoreCachedDiff();
+    if (!cached) return;
+    // Resolve active sheet and selection address
+    await Excel.run(async (context) => {
+      const wb = context.workbook;
+      const ws = wb.worksheets.getActiveWorksheet();
+      ws.load(["name", "id"]);
+      await context.sync();
+      const sheetName = ws.name;
+      // Clear previous callout if any
+      try { await clearActiveCallout(); } catch (_) {}
+      const addr = event && event.address ? event.address : null;
+      const pos = parseA1ToZeroBased(addr);
+      if (!pos) return; // only single-cell selections supported
+      const s = cached.bySheet && cached.bySheet[sheetName];
+      if (!s) return;
+      const rows = s.rows || 0;
+      const cols = s.cols || 0;
+      if (pos.row < 0 || pos.col < 0 || pos.row >= rows || pos.col >= cols) return;
+      const code = s.cells[pos.row * cols + pos.col];
+      if (!code) return; // unchanged
+      // Read current cell value/formula
+      const target = ws.getRange(addr);
+      target.load(["values", "formulas"]);
+      await context.sync();
+      const currVal = (target.values && target.values[0] ? target.values[0][0] : null);
+      const currF = (target.formulas && target.formulas[0] ? target.formulas[0][0] : null);
+      const currCell = { v: currVal, f: typeof currF === 'string' ? currF : null };
+      const baseCell = getBaselineCellValue(sheetName, pos.row, pos.col);
+      let newText = '';
+      let oldText = '';
+      if (code === 4) { // formula change
+        newText = currCell.f && currCell.f.startsWith('=') ? currCell.f : (currCell.v == null ? '' : String(currCell.v));
+        oldText = baseCell && typeof baseCell.f === 'string' && baseCell.f ? baseCell.f : (baseCell && baseCell.v != null ? String(baseCell.v) : '');
+      } else if (code === 3) { // value change (same formula)
+        newText = currCell.v == null ? '' : String(currCell.v);
+        oldText = baseCell && baseCell.v != null ? String(baseCell.v) : '';
+      } else if (code === 1) { // added in current
+        newText = formatValueForDisplay(currCell);
+        oldText = '';
+      } else if (code === 2) { // removed from current
+        newText = '';
+        oldText = formatValueForDisplay(baseCell);
+      }
+      // If both strings are empty, do not show
+      if (!newText && !oldText) return;
+      // Respect existing data validation if present
+      let alreadyHasValidation = false;
+      try {
+        const dv = target.dataValidation;
+        dv.load(["rule/type", "prompt/showPrompt"]);
+        await context.sync();
+        alreadyHasValidation = !!(dv && dv.rule && dv.rule.type);
+      } catch (_) { alreadyHasValidation = false; }
+      if (alreadyHasValidation) return;
+      try {
+        const dv = target.dataValidation;
+        try {
+          dv.prompt = { showPrompt: true, title: 'New / Old', message: `New: ${newText}\nOld: ${oldText}` };
+        } catch (_) {
+          try { dv.inputMessage = { showInputMessage: true, title: 'New / Old', message: `New: ${newText}\nOld: ${oldText}` }; } catch (_) { /* ignore */ }
+        }
+        activeCallout = { sheetName, address: addr, weAddedValidation: true };
+      } catch (_) { /* ignore */ }
+      await context.sync();
+    });
+  } catch (_) { /* ignore */ }
+}
+
