@@ -1,0 +1,289 @@
+/* 
+ * Copyright (c) Microsoft Corporation. All rights reserved. Licensed under the MIT license.
+ * See LICENSE in the project root for license information.
+ */
+
+ html,
+ body {
+     width: 100%;
+     height: 100%;
+     margin: 0;
+     padding: 0;
+     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+     color: #1f2937; /* neutral-800 */
+     background: #f7f9fc; /* subtle pane bg */
+ }
+ 
+ ul {
+     margin: 0;
+     padding: 0;
+ }
+ 
+ .ms-welcome__header {
+    padding: 20px;
+    padding-bottom: 30px;
+    padding-top: 100px;
+    display: -webkit-flex;
+    display: flex;
+    -webkit-flex-direction: column;
+    flex-direction: column;
+    align-items: center;
+ }
+
+ .ms-welcome__main {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-flex-direction: column;
+    flex-direction: column;
+    -webkit-flex-wrap: nowrap;
+    flex-wrap: nowrap;
+    -webkit-align-items: center;
+    align-items: center;
+    -webkit-flex: 1 0 0;
+    flex: 1 0 0;
+    padding: 16px 16px 20px; /* increased padding for breathing room */
+ }
+ 
+ .ms-welcome__main > h2 {
+     width: 100%;
+     text-align: center;
+ }
+ 
+ .ms-welcome__features {
+     list-style-type: none;
+     margin-top: 20px;
+ }
+ 
+ .ms-welcome__features.ms-List .ms-ListItem {
+     padding-bottom: 20px;
+     display: -webkit-flex;
+     display: flex;
+ }
+ 
+ .ms-welcome__features.ms-List .ms-ListItem > .ms-Icon {
+     margin-right: 10px;
+ }
+ 
+ .ms-welcome__action.ms-Button--hero {
+     margin-top: 30px;
+ }
+ 
+.ms-Button.ms-Button--hero .ms-Button-label {
+  color: #0078d7;
+}
+
+.ms-Button.ms-Button--hero:hover .ms-Button-label,
+.ms-Button.ms-Button--hero:focus .ms-Button-label{
+  color: #005a9e;
+  cursor: pointer;
+}
+
+b {
+    font-weight: bold;
+}
+
+.is-hidden {
+    display: none !important;
+}
+
+/* Compare UI layout */
+.compare-container {
+    width: 100%;
+    max-width: 440px; /* was 420px */
+    background: #ffffff;
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.1);
+}
+
+.field-group {
+    display: -ms-flexbox;
+    display: flex;
+    -ms-flex-direction: column;
+    flex-direction: column;
+    margin: 12px 0 14px 0; /* slightly larger spacing */
+}
+
+/* subtle labels */
+.field-group > label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #6b7280; /* neutral-500 */
+    margin-bottom: 6px;
+}
+
+select#source-sheet,
+select#second-sheet {
+    padding: 6px 8px;
+}
+
+.actions {
+    margin-top: 10px;
+    display: -ms-flexbox;
+    display: flex;
+    -ms-flex-align: center;
+    align-items: center;
+    -ms-flex-wrap: wrap;
+    flex-wrap: wrap;
+}
+
+.actions .action-secondary {
+    margin-left: 8px;
+}
+
+.validation {
+    margin-top: 10px;
+    color: #027a48; /* friendly green */
+    background: #ecfdf5;
+    border: 1px solid #a7f3d0;
+    border-radius: 8px;
+    padding: 8px 10px;
+}
+.ml-8 {
+    margin-left: 8px;
+}
+
+/* inline actions row for snapshot + upload */
+.inline-actions {
+    display: flex;
+    gap: 8px; /* modern spacing */
+}
+
+.inline-actions .ms-Button.half {
+    -ms-flex: 1 1 0;
+    flex: 1 1 0;
+}
+
+/* Support three equal-width buttons */
+.inline-actions .ms-Button.third {
+    -ms-flex: 1 1 0;
+    flex: 1 1 0;
+}
+
+/* legacy spacing kept by gap */
+.inline-actions #choose-upload.ms-Button.half {
+    /* margin-left removed in favor of gap */
+}
+
+/* legacy spacing kept by gap */
+.inline-actions #choose-upload.ms-Button.third,
+.inline-actions #clear-baselines.ms-Button.third {
+    /* margin-left removed in favor of gap */
+}
+
+.visually-hidden {
+    position: absolute !important;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap; /* added for better accessibility on Safari */
+    border: 0;
+}
+
+/* Confirmation panel for clearing baselines */
+#clear-baselines-confirm .confirm-panel {
+    margin-top: 8px;
+    padding: 10px 12px; /* was 8px */
+    border: 1px solid #fee4e2; /* was #e1e1e1 */
+    border-radius: 10px; /* was 4px */
+    background: #fff6f6; /* was #fff8e1 */
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+
+#clear-baselines-confirm .confirm-text {
+    margin-bottom: 8px;
+    color: #b42318; /* error red */
+}
+
+#clear-baselines-confirm .confirm-actions {
+    display: -ms-flexbox;
+    display: flex;
+    gap: 8px; /* modern spacing */
+}
+
+#clear-baselines-confirm .confirm-actions > * + * {
+    margin-left: 8px;
+}
+
+/* modern controls */
+.compare-container .ms-Button {
+    -webkit-appearance: none;
+    appearance: none;
+    border: 1px solid #e5e7eb;
+    background: #ffffff;
+    color: #111827;
+    border-radius: 10px;
+    padding: 8px 12px;
+    font-size: 14px;
+    line-height: 1.2;
+    transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease, transform 60ms ease;
+    box-shadow: 0 1px 1px rgba(16, 24, 40, 0.04);
+}
+
+.compare-container .ms-Button:hover {
+    background: #f9fafb;
+    border-color: #d1d5db;
+}
+
+.compare-container .ms-Button:active {
+    transform: translateY(0.5px);
+}
+
+.compare-container .ms-Button:focus {
+    outline: none;
+    border-color: #93c5fd;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+}
+
+/* primary emphasis applied via class, not position */
+.compare-container .ms-Button.is-primary {
+    background: #6b7280; /* neutral gray */
+    color: #ffffff;
+    border-color: #6b7280;
+}
+
+.compare-container .ms-Button.is-primary:hover {
+    background: #4b5563; /* darker gray */
+    border-color: #4b5563;
+}
+
+.compare-container .ms-Button.is-primary:active {
+    background: #374151; /* deepest gray */
+    border-color: #374151;
+}
+
+/* selects */
+.compare-container select {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    border: 1px solid #e5e7eb;
+    background: #ffffff url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20"><path fill="%236b7280" d="M5.5 7.5l4.5 4.5 4.5-4.5"/></svg>') no-repeat right 10px center;
+    background-size: 16px 16px;
+    color: #111827;
+    border-radius: 10px;
+    padding: 8px 36px 8px 12px;
+    font-size: 14px;
+    line-height: 1.2;
+}
+
+.compare-container select:focus {
+    outline: none;
+    border-color: #93c5fd;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+}
+
+/* links inside pane */
+.ms-welcome__main a {
+    color: #2563eb;
+    text-decoration: none;
+}
+
+.ms-welcome__main a:hover {
+    text-decoration: underline;
+}
+
+/* dev logs removed for production */
