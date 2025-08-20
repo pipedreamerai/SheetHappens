@@ -344,19 +344,14 @@ function wireRunCrossWorkbookSummary() {
   await writeSummaryToLogs(diff, baseName);
   // Cache diff for lazy per-sheet formatting
   await cacheDiffForLazyApply(diff);
-  await logLinesToSheet([
-    `Compare marker: after cacheDiffForLazyApply`,
-  ], 'Compare');
-  await logLinesToSheet([
-    `Compare start: baseline='${baseName}', sheets=${Object.keys(diff.bySheet||{}).length}, backend=CF-only`
-  ], 'Compare');
+  
   diffEnabled = true;
   // Keep baseline model available for selection callouts
   lastBaselineModelMem = baselineModel;
-  await logLinesToSheet([`Compare marker: before applyTabColors`], 'Compare');
+  
   await applyTabColors(diff);
   // Immediately apply formatting for the currently active sheet
-  await logLinesToSheet([`Compare marker: before applyDiffOnActivation`], 'Compare');
+  
   await applyDiffOnActivation();
       if (msg) msg.textContent = `Compared against ${baseName}: ${diff.summary.total.changedSheets} changed sheets`;
     } catch (e) {
@@ -501,9 +496,7 @@ function initLazyFormatting() {
     const wb = context.workbook;
     wb.worksheets.onActivated.add(applyDiffOnActivation);
     await context.sync();
-    await appendLogsInContext(context, [
-      'Hooked worksheets.onActivated -> applyDiffOnActivation'
-    ], 'Lazy Apply 1');
+    
   }).catch(() => {});
 }
 
@@ -513,27 +506,23 @@ async function applyDiffOnActivation() {
   const cached = restoreCachedDiff();
   if (!cached) return;
     await Excel.run(async (context) => {
-      await appendLogsInContext(context, [
-        `Lazy Apply: entering — diffEnabled=${String(diffEnabled)}, cached=${cached ? 'present' : 'missing'}`
-      ], 'Lazy Apply 2');
+      
       const wb = context.workbook;
       const active = wb.worksheets.getActiveWorksheet();
       active.load(['name']);
       await context.sync();
       const name = active.name;
-      await appendLogsInContext(context, [
-        `Lazy Apply: active='${name}'`
-      ], 'Lazy Apply 3');
+      
       const s = cached.bySheet[name];
       if (!s) {
-        await appendLogsInContext(context, [`Active sheet '${name}' has no diff entry`], "Lazy Apply 4");
+        
         return;
       }
       // Build address runs per code and apply
   const applied = getSetting(APPLIED_ADDRESSES_KEY) || {};
   const already = applied[name];
       if (already && already.length) {
-        await appendLogsInContext(context, [`Sheet '${name}' already applied; skipping`], "Lazy Apply 5");
+        
         return; // already applied this session
       }
       // Pre-clean any custom CF overlays that use our colors
@@ -545,32 +534,19 @@ async function applyDiffOnActivation() {
       if (rows && cols) {
         const rect = active.getRangeByIndexes(0,0,rows,cols);
         const deleted = await deleteTaggedOverlaysInRange(context, rect, new Set([GREEN_COLOR, RED_COLOR, ORANGE_COLOR, OVERLAY_COLOR].map(normalizeColor)));
-        await appendLogsInContext(context, [`Pre-clean CF deleted=${deleted}, usedRange=${rows}x${cols}`], "Lazy Apply 6");
+        
       }
       const groups = buildAddressGroups(s);
-      await appendLogsInContext(context, [
-        `Entering CF apply for '${name}' with groups: add=${groups.add.length}, remove=${groups.remove.length}, value=${groups.value.length}, formula=${groups.formula.length}`
-      ], "Lazy Apply 7");
+      
       const sample = (arr) => arr.slice(0, 8).join(',');
-      await appendLogsInContext(context, [
-        `Applying groups for '${name}': add=${groups.add.length}, remove=${groups.remove.length}, value=${groups.value.length}, formula=${groups.formula.length}`,
-        `Samples — add: ${sample(groups.add)}`,
-        `Samples — remove: ${sample(groups.remove)}`,
-        `Samples — value: ${sample(groups.value)}`,
-        `Samples — formula: ${sample(groups.formula)}`,
-      ], "Lazy Apply 20");
-      await appendLogsInContext(context, [
-        `Lazy Apply: calling applyGroupsToSheet — backend=CF-only`
-      ], 'Lazy Apply 8');
+      
+      
       const appliedCounts = await applyGroupsToSheet(context, active, groups, async (msgs, hdr) => appendLogsInContext(context, msgs, hdr));
       applied[name] = [
         ...Object.values(groups).flat(),
       ];
       await saveSettingAsync(APPLIED_ADDRESSES_KEY, applied);
-      await appendLogsInContext(context, [
-        `Applied ${applied[name].length} ranges to '${name}'`,
-        `Applied counts — add=${appliedCounts.add}, remove=${appliedCounts.remove}, value=${appliedCounts.value}, formula=${appliedCounts.formula}`,
-      ], "Lazy Apply 9");
+      
     });
   } catch (e) {
     await logLinesToSheet([`Error in lazy apply: ${String(e && e.message ? e.message : e)}`], "Lazy Apply Error");
@@ -658,20 +634,10 @@ function toA1(r1, c1, r2, c2) {
 }
 
 async function applyGroupsToSheet(context, worksheet, groups, logFn) {
-  try {
-    if (logFn) await logFn([
-      `CF backend: ENTER applyGroupsToSheet — add=${groups.add.length}, remove=${groups.remove.length}, value=${groups.value.length}, formula=${groups.formula.length}`
-    ], 'CF Backend');
-  } catch (_) {
-    try { await logLinesToSheet([
-      `CF backend (fallback): ENTER — add=${groups.add.length}, remove=${groups.remove.length}, value=${groups.value.length}, formula=${groups.formula.length}`
-    ], 'CF Backend'); } catch (_) {}
-  }
+  
   // Apply conditional formats only; no direct fills
   const applyCF = async (addresses, color, label) => {
-    try { await appendLogsInContext(context, [ `CF backend: category '${label}' addresses=${addresses ? addresses.length : 0}` ], 'CF Backend'); } catch (_) {
-      try { await logLinesToSheet([ `CF backend (fallback): category '${label}' addresses=${addresses ? addresses.length : 0}` ], 'CF Backend'); } catch (_) {}
-    }
+    
     if (!addresses || addresses.length === 0) return 0;
     let created = 0;
     let sampled = 0;
@@ -725,15 +691,7 @@ async function applyGroupsToSheet(context, worksheet, groups, logFn) {
   const valN = await applyCF(groups.value, OVERLAY_COLOR, 'value');
   const frmN = await applyCF(groups.formula, ORANGE_COLOR, 'formula');
   await context.sync();
-  try {
-    if (logFn) await logFn([
-      `CF backend: EXIT applyGroupsToSheet — created add=${addN}, remove=${remN}, value=${valN}, formula=${frmN}`
-    ], 'CF Backend');
-  } catch (_) {
-    try { await logLinesToSheet([
-      `CF backend (fallback): EXIT — created add=${addN}, remove=${remN}, value=${valN}, formula=${frmN}`
-    ], 'CF Backend'); } catch (_) {}
-  }
+  
   return { add: addN, remove: remN, value: valN, formula: frmN };
 }
 
@@ -882,6 +840,24 @@ Office.onReady(() => {
     initSelectionCallouts();
     wireClearDiffFormatting();
   wireClearBaselines();
+    // Revert selection button
+    try {
+      const rvBtn = document.getElementById('revert-selection');
+      if (rvBtn) {
+        try { logLinesToSheet([ 'Wiring: found #revert-selection button' ], 'Revert Wire'); } catch (_) {}
+        rvBtn.addEventListener('click', async () => {
+          try {
+            try { await logLinesToSheet([ 'Click: Revert Selection button pressed' ], 'Revert'); } catch (_) {}
+            await revertSelectedCellIfDiff();
+          } catch (e) {
+            try { await logLinesToSheet([ `Revert button handler error: ${String(e && e.message ? e.message : e)}` ], 'Revert Error'); } catch (_) {}
+          }
+        });
+      } else {
+        try { logLinesToSheet([ 'Wiring: #revert-selection button NOT found' ], 'Revert Wire'); } catch (_) {}
+      }
+    } catch (e) { try { logLinesToSheet([ `Revert wiring error: ${String(e && e.message ? e.message : e)}` ], 'Revert Wire'); } catch (_) {} }
+    // Hotkey removed per request (pane focus required). Use 'Revert Selection' button instead.
   } catch (e) {
     // ignore wiring errors
   }
@@ -933,12 +909,14 @@ async function handleActivationForSelection() {
 function parseA1ToZeroBased(addr) {
   // Accept forms like 'A1' only. Returns { row, col } zero-based or null
   if (!addr || typeof addr !== 'string') return null;
-  const simple = addr.trim().toUpperCase();
-  // Reject ranges
-  if (simple.indexOf(':') !== -1) return null;
+  let simple = addr.trim().toUpperCase();
   // Remove any sheet qualifier if present (e.g., 'Sheet1!A1')
   const excl = simple.lastIndexOf('!');
-  const a = excl >= 0 ? simple.slice(excl + 1) : simple;
+  let a = excl >= 0 ? simple.slice(excl + 1) : simple;
+  // If a range like 'A1:A1' sneaks in, take the first cell
+  if (a.indexOf(':') !== -1) a = a.split(':')[0];
+  // Drop absolute markers like '$A$1'
+  a = a.replace(/\$/g, '');
   const m = /^([A-Z]+)(\d+)$/.exec(a);
   if (!m) return null;
   const colLetters = m[1];
@@ -972,6 +950,42 @@ function formatValueForDisplay(cell) {
   if (f && f.startsWith('=')) return f;
   if (cell.v == null) return '';
   return String(cell.v);
+}
+
+function parseA1RangeToZeroBased(rangeA1) {
+  try {
+    if (!rangeA1) return null;
+    let txt = String(rangeA1).trim();
+    const excl = txt.lastIndexOf('!');
+    if (excl >= 0) txt = txt.slice(excl + 1);
+    const parts = txt.split(':');
+    const norm = parts.length === 1 ? [parts[0], parts[0]] : [parts[0], parts[1]];
+    const p = (cell) => {
+      const c = cell.replace(/\$/g, '').toUpperCase();
+      const m = /^([A-Z]+)(\d+)$/.exec(c);
+      if (!m) return null;
+      const colLetters = m[1];
+      const rowNum = parseInt(m[2], 10);
+      let col = 0; for (let i = 0; i < colLetters.length; i++) col = col * 26 + (colLetters.charCodeAt(i) - 64);
+      return { row: rowNum - 1, col: col - 1 };
+    };
+    const a = p(norm[0]);
+    const b = p(norm[1]);
+    if (!a || !b) return null;
+    return { r1: Math.min(a.row, b.row), c1: Math.min(a.col, b.col), r2: Math.max(a.row, b.row), c2: Math.max(a.col, b.col) };
+  } catch (_) { return null; }
+}
+
+function a1AddressContainsCell(addr, row, col) {
+  try {
+    const r = parseA1RangeToZeroBased(addr);
+    if (!r) return false;
+    return row >= r.r1 && row <= r.r2 && col >= r.c1 && col <= r.c2;
+  } catch (_) { return false; }
+}
+
+function encodeUint8ToBase64(u8) {
+  try { return btoa(String.fromCharCode.apply(null, Array.from(u8))); } catch (_) { return ''; }
 }
 
 async function clearActiveCallout() {
@@ -1023,6 +1037,39 @@ async function handleSelectionChanged(event) {
       const currF = (target.formulas && target.formulas[0] ? target.formulas[0][0] : null);
       const currCell = { v: currVal, f: typeof currF === 'string' ? currF : null };
       const baseCell = getBaselineCellValue(sheetName, pos.row, pos.col);
+      // If this is a yellow cell (value-only change) but the value now equals baseline, remove the overlay
+      try {
+        if (code === 3) {
+          const cv = (typeof currCell.v === 'string') ? currCell.v.trim() : currCell.v;
+          const bv = (typeof baseCell.v === 'string') ? baseCell.v.trim() : baseCell.v;
+          if (cv === bv) {
+            // Targeted cleanup like revert path
+            try {
+              const applied = getSetting(APPLIED_ADDRESSES_KEY) || {};
+              const sheetApplied = Array.isArray(applied[sheetName]) ? applied[sheetName] : [];
+              const keep = [];
+              let removedCount = 0;
+              for (const a of sheetApplied) {
+                if (a1AddressContainsCell(a, pos.row, pos.col)) {
+                  try {
+                    const rr = ws.getRange(a);
+                    const deleted = await deleteTaggedOverlaysInRange(context, rr, new Set([GREEN_COLOR, RED_COLOR, ORANGE_COLOR, OVERLAY_COLOR].map(normalizeColor)), { matchRuleTypes: true, brutal: true });
+                    removedCount += deleted;
+                  } catch (_) { /* ignore */ }
+                } else {
+                  keep.push(a);
+                }
+              }
+              applied[sheetName] = keep;
+              await saveSettingAsync(APPLIED_ADDRESSES_KEY, applied);
+              // Last-chance: clear CF only on this single cell
+              try { const cellCF = target.conditionalFormats; cellCF.clearAll(); await context.sync(); } catch (_) { /* ignore */ }
+              await appendLogsInContext(context, [ `Auto-clear: yellow cell now equals baseline — deleted=${removedCount}, remainingTracked=${keep.length}` ], 'Callout');
+            } catch (_) { /* ignore */ }
+            return; // do not show tooltip
+          }
+        }
+      } catch (_) { /* ignore */ }
       let newText = '';
       let oldText = '';
       if (code === 4) { // formula change
@@ -1039,7 +1086,12 @@ async function handleSelectionChanged(event) {
         oldText = formatValueForDisplay(baseCell);
       }
       // If both strings are empty, do not show
-      if (!newText && !oldText) return;
+      if (!newText && !oldText) {
+        await appendLogsInContext(context, [
+          `Selection '${sheetName}!${addr}': empty display — skipping tooltip`
+        ], 'Callout');
+        return;
+      }
       // Respect existing data validation if present
       let alreadyHasValidation = false;
       try {
@@ -1057,9 +1109,97 @@ async function handleSelectionChanged(event) {
           try { dv.inputMessage = { showInputMessage: true, title: 'New / Old', message: `New: ${newText}\nOld: ${oldText}` }; } catch (_) { /* ignore */ }
         }
         activeCallout = { sheetName, address: addr, weAddedValidation: true };
-      } catch (_) { /* ignore */ }
+      } catch (e) {
+        await appendLogsInContext(context, [
+          `Tooltip set failed on '${sheetName}!${addr}': ${String(e && e.message ? e.message : e)}`
+        ], 'Callout Error');
+      }
       await context.sync();
     });
   } catch (_) { /* ignore */ }
+}
+
+// Revert the currently selected cell to the baseline for green(1)/red(2)/orange(4) only
+async function revertSelectedCellIfDiff() {
+  try {
+    if (!diffEnabled) {
+      return;
+    }
+    const cached = restoreCachedDiff();
+    if (!cached) { return; }
+    if (!lastBaselineModelMem) { return; }
+    await Excel.run(async (context) => {
+      const wb = context.workbook;
+      const ws = wb.worksheets.getActiveWorksheet();
+      ws.load(["name"]);
+      const sel = wb.getSelectedRange();
+      sel.load(["address", "rowCount", "columnCount", "formulas", "values"]);
+      await context.sync();
+      if (sel.rowCount !== 1 || sel.columnCount !== 1) { return; }
+      const sheetName = ws.name;
+      let addr = sel.address;
+      // Normalize address: prefer local A1 without sheet qualifier and absolutes, single cell
+      if (Array.isArray(addr)) addr = addr[0];
+      const pos = parseA1ToZeroBased(addr);
+      if (!pos) { return; }
+      const sheetDiff = cached.bySheet && cached.bySheet[sheetName];
+      if (!sheetDiff) { return; }
+      const { rows, cols, cells } = sheetDiff;
+      if (pos.row < 0 || pos.col < 0 || pos.row >= rows || pos.col >= cols) return;
+      const code = cells[pos.row * cols + pos.col];
+      if (!(code === 1 || code === 2 || code === 4)) { return; }
+      const target = ws.getRangeByIndexes(pos.row, pos.col, 1, 1);
+      // Determine baseline content
+      const base = getBaselineCellValue(sheetName, pos.row, pos.col);
+      const baselineFormula = (typeof base.f === 'string' && base.f) ? base.f : null;
+      const baselineValue = (base.v == null ? null : base.v);
+      // Apply baseline: prefer formula if present; otherwise set value; clear if both null
+      if (baselineFormula) {
+        try { target.formulas = [[baselineFormula]]; } catch (_) {}
+      } else if (baselineValue !== null) {
+        try { target.values = [[baselineValue]]; } catch (_) {}
+      } else {
+        // Revert deletion/addition to blank — set explicit empty value to ensure content is removed across hosts
+        try { target.values = [[""]]; } catch (_) {}
+      }
+      // Force recalc for safety
+      try { ws.calculate(Excel.CalculationType.recalculate); } catch (_) {}
+      // Remove CF overlays for this exact cell if we applied them earlier
+      try {
+        const applied = getSetting(APPLIED_ADDRESSES_KEY) || {};
+        const sheetApplied = Array.isArray(applied[sheetName]) ? applied[sheetName] : [];
+        const keep = [];
+        let removedCount = 0;
+        for (const a of sheetApplied) {
+          if (a1AddressContainsCell(a, pos.row, pos.col)) {
+            try {
+              const rr = ws.getRange(a);
+              const deleted = await deleteTaggedOverlaysInRange(context, rr, new Set([GREEN_COLOR, RED_COLOR, ORANGE_COLOR, OVERLAY_COLOR].map(normalizeColor)), { matchRuleTypes: true, brutal: true });
+              removedCount += deleted;
+            } catch (_) { /* ignore */ }
+          } else {
+            keep.push(a);
+          }
+        }
+        applied[sheetName] = keep;
+        await saveSettingAsync(APPLIED_ADDRESSES_KEY, applied);
+        // Last-chance: clear all CF strictly on this one cell to ensure highlight is gone
+        try {
+          const cellCF = target.conditionalFormats;
+          cellCF.clearAll();
+          await context.sync();
+        } catch (e2) {
+          
+        }
+      } catch (e) {
+        
+      }
+      // Verify read-back
+      try { target.load([ 'values', 'formulas' ]); await context.sync(); } catch (_) {}
+      await context.sync();
+    });
+  } catch (e) {
+    
+  }
 }
 
