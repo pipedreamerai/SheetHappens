@@ -3,8 +3,10 @@
 const CODE_NONE = 0;
 const CODE_ADD = 1; // green
 const CODE_REMOVE = 2; // red
-const CODE_VALUE = 3; // yellow
-const CODE_FORMULA = 4; // orange
+// CODE_VALUE: calculated value difference (same non-empty formula)
+// CODE_FORMULA: explicit change — formula text changed OR hardcoded literal changed
+const CODE_VALUE = 3; // yellow (calculated value-only)
+const CODE_FORMULA = 4; // orange (formula text or literal change)
 
 function normFormula(f) {
   if (typeof f !== "string") return "";
@@ -47,8 +49,11 @@ function classifyCell(a, b) {
   // Normalize strings by trimming; numbers/booleans compare directly
   const av = typeof a.v === "string" ? a.v.trim() : a.v;
   const bv = typeof b.v === "string" ? b.v.trim() : b.v;
-  if (av !== bv) return CODE_VALUE;
-  return CODE_NONE;
+  if (av === bv) return CODE_NONE;
+  // If both are literals (no formula), treat as explicit change (orange)
+  if (af === "" /* and bf === "" by equality above */) return CODE_FORMULA;
+  // Otherwise, same non-empty formula: calculated value-only change (yellow)
+  return CODE_VALUE;
 }
 
 export function diffWorkbooks(curr, base) {
