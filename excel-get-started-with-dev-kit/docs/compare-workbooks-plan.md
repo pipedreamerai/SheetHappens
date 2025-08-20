@@ -99,7 +99,7 @@ Error modes: invalid workbook file, oversized sheets (guardrails), throttling, p
 - Acceptance: On one sheet, apply/clear runs quickly (<1s on medium sheets) and leaves no orphan formatting.
 - Rollback: disable format module; no changes committed to workbook.
 
-6) feat(lazy): apply on activation only
+6) feat(lazy): apply on activation only (done)
 - `events.js`: subscribe to `workbook.worksheets.onActivated`, also handle `onAdded/onDeleted` to keep wiring consistent.
 - When a sheet activates and has a diff, apply fills if not already applied; do not pre-apply hidden/inactive sheets.
 - Add toggle in UI; default ON.

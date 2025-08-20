@@ -30,6 +30,7 @@ Office.onReady((info) => {
   wireUploadBaseline();
   wireInspectUpload();
   wireRunCrossWorkbookSummary();
+  wireResetTabColors();
   }
 });
 
@@ -615,7 +616,8 @@ function wireRunCrossWorkbookSummary() {
         baseName = rec.name || baseName;
       }
       const diff = diffWorkbooks(current, baselineModel);
-      await writeSummaryToLogs(diff, baseName);
+  await writeSummaryToLogs(diff, baseName);
+  await applyTabColors(diff);
       if (msg) msg.textContent = `Compared against ${baseName}: ${diff.summary.total.changedSheets} changed sheets`;
     } catch (e) {
       if (msg) msg.textContent = "Failed to compute diff: " + String(e && e.message ? e.message : e);
@@ -664,6 +666,60 @@ async function writeSummaryToLogs(diff, baseName) {
       // ignore formatting errors
     }
     await context.sync();
+  });
+}
+
+async function applyTabColors(diff) {
+  // Priority: red (removed) > orange (formula) > yellow (value) > green (add) > default
+  await Excel.run(async (context) => {
+    const wb = context.workbook;
+    const wsCol = wb.worksheets;
+    wsCol.load("items/name");
+    await context.sync();
+    for (const ws of wsCol.items) {
+      const s = diff.bySheet[ws.name];
+      if (!s || !s.counts) continue;
+      const { add, remove, value, formula } = s.counts;
+  let color = null;
+  if (remove > 0) color = RED_COLOR;
+  else if (formula > 0) color = ORANGE_COLOR;
+  else if (value > 0) color = OVERLAY_COLOR; // yellow
+  else if (add > 0) color = GREEN_COLOR;
+      try {
+        ws.tabColor = color;
+      } catch (_) {
+        // ignore if not supported
+      }
+    }
+    await context.sync();
+  });
+}
+
+function wireResetTabColors() {
+  const btn = document.getElementById("reset-tab-colors");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    const msg = document.getElementById("validation");
+    try {
+      await Excel.run(async (context) => {
+        const wsCol = context.workbook.worksheets;
+        wsCol.load("items/name,items/tabColor");
+        await context.sync();
+        // First pass: null
+        for (const ws of wsCol.items) {
+          try { ws.tabColor = null; } catch (_) { /* ignore */ }
+        }
+        await context.sync();
+        // Second pass: empty string as fallback for hosts that ignore null
+        for (const ws of wsCol.items) {
+          try { ws.tabColor = ""; } catch (_) { /* ignore */ }
+        }
+        await context.sync();
+      });
+      if (msg) msg.textContent = "Sheet tab colors reset.";
+    } catch (e) {
+      if (msg) msg.textContent = "Failed to reset tab colors: " + String(e && e.message ? e.message : e);
+    }
   });
 }
 
