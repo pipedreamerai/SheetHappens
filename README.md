@@ -1,6 +1,6 @@
-## Excel Workbook Versioning (macOS, local-only)
+## What Changed? - Excel Workbook Versioning
 
-Compare your current Excel workbook against a baseline (uploaded .xlsx or a saved snapshot) and visualize differences directly in the workbook. All data stays local; no cloud integration and no file export.
+Compare your current Excel workbook against a baseline (another .xlsx or a saved snapshot) and visualize differences directly in the workbook. All data stays local; no cloud integration and no file export.
 
 ### Features
 
