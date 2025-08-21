@@ -15,6 +15,8 @@ Compare your current Excel workbook against a baseline (another .xlsx or a saved
 - Auto apply-per-sheet: formatting is applied when you activate a sheet
 - Selection callout: select a changed cell to see “New / Old” values
 - One-click cleanup: Stop Diff removes all highlights and resets tab colors
+- Revert cells with a one-click "Revert" button
+- Operates only on cell values and NOT on formatting
 
 ## Quickstart
 
