@@ -20,17 +20,23 @@ Compare your current Excel workbook against a baseline (another .xlsx or a saved
 
 ### Requirements
 
-- Excel for macOS (Desktop)
-- Node.js LTS and npm
+- Excel Desktop (macOS or Windows)
+- Excel 365
+- Internet access to load the add-in assets
 
-### Install and run
+### Install (no dev required)
 
-```bash
-npm install
-npm run dev
-```
+1. Download the production manifest: [Download `manifest.xml`](https://raw.githubusercontent.com/pipedreamerai/excel_versioning/main/manifest.xml)
+2. macOS (Excel Desktop)
+   - Copy `manifest.xml` to `~/Library/Containers/com.microsoft.Excel/Data/Documents/wef/` (create the `wef` folder if it doesn’t exist), then restart Excel.
+3. Windows or Excel 365
+   - Sideload the add-in (Worked for me on Excel 365 by going to Add-ins -> More Add-ins -> My Add-ins -> Upload My Add-in and then selecting the manifest file)
+4. Open any workbook. In the Home tab, you should see the command group “Versioning Tools”. Click “Compare Sheets” to open the task pane.
 
-This starts the dev server and sideloads the add-in into Excel Desktop. A new Excel window opens with the task pane.
+Notes
+
+- The manifest points to a hosted, secure URL (`https://pipedreamerai.github.io/excel_versioning/addin/taskpane.html`). You do not need to run a server.
+- If you previously had Excel open while copying the manifest, fully quit and relaunch Excel.
 
 ## Using the add-in
 
