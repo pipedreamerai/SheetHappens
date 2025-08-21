@@ -1,6 +1,6 @@
 # Excel Workbook Versioning: Critique + Revised Plan (macOS, local-first)
 
-This rewrites the existing plan with a leaner architecture, clearer contracts, and a commit-by-commit path that’s small, testable, and reversible. It preserves your current same-workbook compare and adds local archiving, cross-workbook diffing, lazy formatting, and sheet-tab colors. Cloud is deliberately last.
+This rewrites the existing plan with a leaner architecture, clearer contracts, and a commit-by-commit path that’s small, testable, and reversible. It preserves your current same-workbook compare and adds local archiving, cross-workbook diffing, lazy formatting, and sheet-tab colors.
 
 ## Quick critique of the previous plan
 
@@ -8,13 +8,13 @@ This rewrites the existing plan with a leaner architecture, clearer contracts, a
 - Gaps tightened here:
   - Contracts were not explicit enough for testing; we add clear input/output types and result shapes.
   - Diff application strategy needs batching with RangeAreas and rectangle grouping to avoid slow per-cell writes.
-  - Archiving should rely on Office File APIs when available, with a graceful fallback to snapshot JSON; both are included.
+  - Archiving relies on local snapshot JSON stored in IndexedDB; no file download/export required.
   - Event wiring must include onAdded/onDeleted/onActivated to keep lazy-load robust as sheets change.
   - Explicit success criteria, rollbacks, and perf guardrails were light; these are now embedded per commit.
 
-## MVP goals (macOS, no SharePoint/OneDrive)
+## MVP goals (macOS, local-only)
 
-- Archive current workbook locally via user action: JSON snapshot in IndexedDB and an optional .xlsx/.ooxml download.
+- Archive current workbook locally via user action: JSON snapshot in IndexedDB.
 - Compare current workbook vs a selected baseline (uploaded .xlsx or stored snapshot).
 - Visualize differences using green/red/yellow/orange fills in the current workbook.
 - Lazy-load formatting: only apply fills when a sheet becomes active.
@@ -49,7 +49,7 @@ This rewrites the existing plan with a leaner architecture, clearer contracts, a
   - cells: Uint8Array or number[][] with enum codes:
     - 0=none, 1=green(add), 2=red(remove), 3=yellow(value change), 4=orange(formula change)
 
-Error modes: invalid workbook file, oversized sheets (guardrails), throttling, permission/user-cancel. Success: non-throwing functions return models/diffs; UI shows per-sheet counts.
+Error modes: invalid workbook file, oversized sheets (guardrails), permission/user-cancel. Success: non-throwing functions return models/diffs; UI shows per-sheet counts.
 
 ## Architecture and file layout
 
@@ -64,7 +64,7 @@ Error modes: invalid workbook file, oversized sheets (guardrails), throttling, p
 
 ## UX tweaks (task pane)
 
-- Controls: “Archive snapshot”, “Choose baseline …” (upload or snapshot), “Run compare”, “Clear formatting”, toggle “Lazy apply by sheet”.
+- Controls: “Archive snapshot”, “Choose baseline …” (upload or snapshot), “Run compare”, “Clear formatting”.
 - Summary: total changes + per-sheet counts; click a sheet name to activate it.
 - Non-blocking progress messages; fail gracefully with a single-line error in the pane.
 
@@ -116,8 +116,7 @@ Error modes: invalid workbook file, oversized sheets (guardrails), throttling, p
 
 - `events.js`: subscribe to `workbook.worksheets.onActivated`, also handle `onAdded/onDeleted` to keep wiring consistent.
 - When a sheet activates and has a diff, apply fills if not already applied; do not pre-apply hidden/inactive sheets.
-- Add toggle in UI; default ON.
-- Acceptance: Switching sheets applies formatting on demand; Clear removes current sheet’s fills; toggling OFF applies all visible sheets.
+- Acceptance: Switching sheets applies formatting on demand; Clear removes current sheet’s fills.
 - Rollback: unsubscribe events; keep manual Apply.
 
 7. feat(tabs): sheet tab colors (done)
@@ -128,34 +127,25 @@ Error modes: invalid workbook file, oversized sheets (guardrails), throttling, p
 - Acceptance: Tabs change on compare and reset on command.
 - Rollback: remove color set and reset.
 
-8. feat(archive): downloadable copy of current workbook (pending; MVP: optional)
+8. docs/tests: polish (expanded)
 
-- Try Office File APIs: export OOXML or compressed workbook; create a Blob and trigger user download named `Archive/<WorkbookName>_YYYYMMDD_HHMMSS.xlsx` (or .xml if OOXML only is available). Store the last chosen “Archive” folder name (not path) in settings.
-- Fallback (if API not supported): snapshot JSON plus an instruction link to “Save As” in Excel UI.
-- Acceptance: Button prompts a download; file opens in Excel.
-- Rollback: disable button; keep snapshots only.
+- README (user-facing):
+  - Quickstart (install, run, first compare in under 1 minute).
+  - Features overview (archive snapshot, upload baseline, run compare, lazy apply toggle, tab colors, clear formatting).
+  - How-to guides: Archive snapshot, Choose baseline (upload vs snapshot), Run compare, Clear formatting, Reset tab colors.
+  - Limitations and scope: visible sheets only (MVP), ignored objects (tables/pivots/charts/shapes/VBA), dates treated as serials, formula normalization rules.
+  - Troubleshooting: common error messages and resolutions (e.g., invalid file, large sheet warning, permission/user-cancel).
+- In-app copy polish:
+  - Consistent button/label text, tooltip/help text for key controls, and concise progress/error messages.
+- Tests:
+  - Diff engine: values vs formulas; trimmed strings; dates as numbers; blank vs empty string; error values; formula text normalization; added/removed sheets; per-sheet status.
+  - Formatting: apply/clear idempotency; category priority for tab colors (red>orange>yellow>green).
+  - Events: lazy apply on activation; clear formatting behavior on current sheet.
+- Dev docs:
+  - Minimal contributor notes: where core modules live, how to run tests, how to add a new comparator.
+- Acceptance: Lint/tests pass; README updated with screenshots/GIFs for key flows.
 
-9. perf: guardrails and batching (partial)
-
-- Chunk very large address lists, throttle `context.sync`, and early-abort with a helpful message if estimated writes exceed a safe limit.
-- Setting: max cells per sheet for compare.
-- Acceptance: Large-but-realistic books complete without throttling; message appears if limits exceeded.
-- Rollback: increase limits or skip formatting when over threshold.
-
-Status note: Basic guardrails are in place today (maxCellsPerSheet used in model builder; batching via `getRanges`). Remaining: chunking very large address lists and `context.sync` throttling when range areas are not supported.
-
-10. docs/tests: polish (pending)
-
-- Add README sections for archive, upload, compare, lazy mode, and tab colors; document limitations.
-- Expand diff unit tests (value vs formula, blanks, errors).
-- Acceptance: Lint/tests pass; docs up to date.
-
-11. cloud (optional last): OneDrive/SharePoint (pending; non-MVP)
-
-- Add SSO; list and write to an Archive folder near the workbook; baseline picker can browse cloud archive.
-- Acceptance: In cloud-hosted contexts, archive and list work.
-
-12. feat(callout): selection “New/Old” message above changed cells (new; recommended for MVP)
+9. feat(callout): selection “New/Old” message above changed cells (new; recommended for MVP)
 
 - Behavior: When the user selects a cell that has a diff code (green/red/yellow/orange), show a small two-line callout above the cell: first line `New:` with the current content (formula text if the formula changed, otherwise the displayed value); second line `Old:` with the baseline content using the same rule.
 - Data source: Reuse the cached diff to detect whether the selected address is changed and which code applies. Retain the baseline WorkbookModel in memory after a compare run (and/or in document settings for the session) so we can look up the old cell value/formula on demand.
@@ -169,7 +159,7 @@ Status note: Basic guardrails are in place today (maxCellsPerSheet used in model
 ## Implementation notes (practical)
 
 - Reuse your existing same-workbook fill logic as-is for intra-workbook checks; cross-workbook uses the diff engine + batch formatting.
-- Use document settings to remember: last overlay rect, applied addresses per sheet, last archive folder name, feature flags.
+- Use document settings to remember: last overlay rect, applied addresses per sheet, feature flags.
 - Favor `RangeAreas` and single color sets per category to minimize traffic.
 - Treat dates as numbers for equality (Excel serials); compare strings trimmed; compare formulas by normalized text.
 - Skip hidden sheets in MVP; add a setting to include them later.
@@ -188,7 +178,6 @@ Status note: Basic guardrails are in place today (maxCellsPerSheet used in model
 - Diff summary — accurate counts by sheet and total.
 - Lazy cell coloring — applied only on activation; Clear works.
 - Sheet tab colors — reflect severity and can be reset.
-- Archive download — user gets a viable copy; fallback path documented.
 
 ## Commit message suggestions
 
@@ -200,7 +189,4 @@ Status note: Basic guardrails are in place today (maxCellsPerSheet used in model
 - feat(format): batch apply/clear with RangeAreas
 - feat(lazy): apply diffs on active sheet only; add toggle
 - feat(tabs): color worksheet tabs by status
-- feat(archive): user-downloadable workbook copy
-- perf(format): chunking and sync throttling
 - docs(test): expand docs and unit tests
-- feat(cloud): OneDrive/SharePoint archive (optional)

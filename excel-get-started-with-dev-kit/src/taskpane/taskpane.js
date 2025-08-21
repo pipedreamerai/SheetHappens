@@ -320,6 +320,7 @@ function wireRunCrossWorkbookSummary() {
   const btn = document.getElementById("run-xwb-summary");
   if (!btn) return;
   btn.addEventListener("click", async () => {
+    try { btn.classList.add('is-primary'); } catch (_) {}
     const msg = document.getElementById("validation");
     const choice = pickSelectedBaseline();
     if (!choice) {
@@ -360,73 +361,23 @@ function wireRunCrossWorkbookSummary() {
   });
 }
 
-// Lightweight log sink in the task pane (appends to #dev-logs when present)
-function appendToDevLogs(lines) {
-  try {
-    const el = document.getElementById('dev-logs');
-    if (!el) return;
-    const text = Array.isArray(lines) ? lines.join('\n') : String(lines);
-    if (el.textContent && el.textContent.length) el.textContent += '\n' + text;
-    else el.textContent = text;
-    try { el.scrollTop = el.scrollHeight; } catch (_) { /* ignore */ }
-  } catch (_) { /* ignore */ }
-}
+// Logging disabled for production UI
+function appendToDevLogs(_) { /* no-op */ }
 
 async function writeSummaryToLogs(diff, baseName) {
   const ts = new Date().toISOString();
-  const lines = [];
-  lines.push(`[${ts}] Cross-workbook diff summary vs ${baseName}`);
-  lines.push(
-    `Total: +${diff.summary.total.add} / -${diff.summary.total.remove} / value ${diff.summary.total.value} / formula ${diff.summary.total.formula} | changed sheets: ${diff.summary.total.changedSheets}`
-  );
-  const names = Object.keys(diff.bySheet).sort();
-  for (const n of names) {
-    const s = diff.bySheet[n];
-    if (!s || !s.counts) continue;
-    const { add, remove, value, formula, changed } = s.counts;
-    if (changed > 0) {
-      lines.push(`- ${n}: +${add} / -${remove} / value ${value} / formula ${formula}`);
-    } else {
-      lines.push(`- ${n}: unchanged`);
-    }
-  }
-  lines.push("", "----", "");
-  // Console + taskpane output
-  try { lines.forEach((l) => console.log(l)); } catch (_) {}
-  appendToDevLogs(lines);
+  // In production UI, we no longer append verbose logs to the pane.
+  // Keep a concise console summary for developers.
+  try {
+    console.log(`[${ts}] Cross-workbook diff summary vs ${baseName}`);
+    console.log(`Total: +${diff.summary.total.add} / -${diff.summary.total.remove} / value ${diff.summary.total.value} / formula ${diff.summary.total.formula} | changed sheets: ${diff.summary.total.changedSheets}`);
+  } catch (_) {}
 }
 
-async function logLinesToSheet(lines, header = "Log") {
-  const ts = new Date().toISOString();
-  const payload = [
-    `[${ts}] ${header}`,
-    ...lines,
-    "",
-  ];
-  // Console + taskpane output
-  try { payload.forEach((l) => console.log(l)); } catch (_) {}
-  appendToDevLogs(payload);
-}
+async function logLinesToSheet(_) { /* no-op */ }
 
 // In-context logger to avoid nested Excel.run; now writes to console
-function appendLogsInContext(context, lines, header = "Log") {
-  const ts = new Date().toISOString();
-  // Normalize lines to strings and surface empty/falsy entries
-  let normalized = Array.isArray(lines) ? lines.slice() : [lines];
-  normalized = normalized.map((entry) => (entry == null ? "(empty)" : String(entry)));
-  if (normalized.length === 0) normalized = ["(no details)"];
-  const headerWithCount = `${header} (+${normalized.length} line${normalized.length === 1 ? '' : 's'})`;
-  const payload = [
-    `[${ts}] ${headerWithCount}`,
-    ...normalized,
-    "",
-  ];
-  // Console + taskpane output
-  try { payload.forEach((l) => console.log(l)); } catch (_) {}
-  appendToDevLogs(payload);
-  // Preserve a Promise return for callers that await this function
-  return Promise.resolve();
-}
+function appendLogsInContext() { return Promise.resolve(); }
 
 // ===== Lazy per-sheet diff formatting =====
 const LAST_DIFF_KEY = 'cc_last_diff_cache_v1';
@@ -453,16 +404,8 @@ async function cacheDiffForLazyApply(diff) {
   // Keep in memory as well
   lastDiffMem = { bySheet: diff.bySheet };
   try {
-    const approxBytes = Object.values(bySheet).reduce((sum, v) => sum + v.cells.length, 0);
     await saveSettingAsync(LAST_DIFF_KEY, { bySheet });
-    await logLinesToSheet([
-      `Cached diff to settings: sheets=${Object.keys(bySheet).length}, approxBytes=${approxBytes}`,
-    ], "Diff Cache");
-  } catch (e) {
-    await logLinesToSheet([
-      `Failed to cache diff to settings: ${String(e && e.message ? e.message : e)}`,
-    ], "Diff Cache Error");
-  }
+  } catch (_) { /* ignore */ }
   // Reset applied addresses tracking
   await saveSettingAsync(APPLIED_ADDRESSES_KEY, {});
   // Reset original fills tracking for a fresh run
@@ -539,9 +482,7 @@ async function applyDiffOnActivation() {
       const groups = buildAddressGroups(s);
       
       const sample = (arr) => arr.slice(0, 8).join(',');
-      
-      
-      const appliedCounts = await applyGroupsToSheet(context, active, groups, async (msgs, hdr) => appendLogsInContext(context, msgs, hdr));
+      const appliedCounts = await applyGroupsToSheet(context, active, groups, null);
       applied[name] = [
         ...Object.values(groups).flat(),
       ];
@@ -549,7 +490,7 @@ async function applyDiffOnActivation() {
       
     });
   } catch (e) {
-    await logLinesToSheet([`Error in lazy apply: ${String(e && e.message ? e.message : e)}`], "Lazy Apply Error");
+    
   }
 }
 
@@ -700,6 +641,7 @@ function wireClearDiffFormatting() {
   if (!btn) return;
   btn.addEventListener('click', async () => {
     const msg = document.getElementById('validation');
+    try { const startBtn = document.getElementById('run-xwb-summary'); if (startBtn) startBtn.classList.remove('is-primary'); } catch (_) {}
     try {
   // Stop diff generation and clear diff cache right away
   diffEnabled = false;
@@ -742,7 +684,7 @@ function wireClearDiffFormatting() {
                 totalDeleted += await deleteTaggedOverlaysInRange(context, rect, colorSet, { matchRuleTypes: true });
               }
             } catch (_) { /* ignore */ }
-            try { await appendLogsInContext(context, [`${ws.name}: Deleted ${totalDeleted} conditional-format overlays (targeted+usedRange)`], "Stop Diff"); } catch (_) {}
+            
           } catch (_) { /* ignore */ }
           // Ensure worksheet gridlines are visible (CF does not hide them)
           try { ws.showGridlines = true; } catch (_) { /* ignore */ }
@@ -805,33 +747,9 @@ Office.onReady(() => {
   if (sideload) sideload.classList.add('is-hidden');
   if (appBody) appBody.classList.remove('is-hidden');
     // Wire Clear Logs button
-    try {
-      const clearLogsBtn = document.getElementById('clear-dev-logs');
-      if (clearLogsBtn) {
-        clearLogsBtn.addEventListener('click', () => {
-          try {
-            const el = document.getElementById('dev-logs');
-            if (el) el.textContent = '';
-          } catch (_) { /* ignore */ }
-        });
-      }
-    } catch (_) { /* ignore */ }
+    // Clear Logs UI removed for production
     // Startup banner: build/host/platform/version and requirement sets
-    try {
-      const stamp = String(Date.now());
-      const host = (Office && Office.context && Office.context.host) || 'unknown-host';
-      const platform = (Office && Office.context && Office.context.platform) || 'unknown-platform';
-      const ver = (Office && Office.context && Office.context.diagnostics && Office.context.context && Office.context.diagnostics.version) || (Office && Office.context && Office.context.diagnostics && Office.context.diagnostics.version) || 'unknown-version';
-      const rs12 = !!(Office && Office.context && Office.context.requirements && Office.context.requirements.isSetSupported && Office.context.requirements.isSetSupported('ExcelApi','1.2'));
-      const rs14 = !!(Office && Office.context && Office.context.requirements && Office.context.requirements.isSetSupported && Office.context.requirements.isSetSupported('ExcelApi','1.4'));
-      const rs17 = !!(Office && Office.context && Office.context.requirements && Office.context.requirements.isSetSupported && Office.context.requirements.isSetSupported('ExcelApi','1.7'));
-      const rs19 = !!(Office && Office.context && Office.context.requirements && Office.context.requirements.isSetSupported && Office.context.requirements.isSetSupported('ExcelApi','1.9'));
-      logLinesToSheet([
-        `BUILD stamp=${stamp}`,
-        `Host=${host}, Platform=${platform}, Version=${ver}`,
-        `ExcelApi support: 1.2=${rs12}, 1.4=${rs14}, 1.7=${rs17}, 1.9=${rs19}`,
-      ], 'Startup');
-    } catch (_) { /* ignore banner log errors */ }
+    // Startup banner logs removed for production
     wireArchiveSnapshot();
     populateSnapshotDropdown();
     wireUploadBaseline();
@@ -844,19 +762,15 @@ Office.onReady(() => {
     try {
       const rvBtn = document.getElementById('revert-selection');
       if (rvBtn) {
-        try { logLinesToSheet([ 'Wiring: found #revert-selection button' ], 'Revert Wire'); } catch (_) {}
+        
         rvBtn.addEventListener('click', async () => {
           try {
-            try { await logLinesToSheet([ 'Click: Revert Selection button pressed' ], 'Revert'); } catch (_) {}
+            
             await revertSelectedCellIfDiff();
-          } catch (e) {
-            try { await logLinesToSheet([ `Revert button handler error: ${String(e && e.message ? e.message : e)}` ], 'Revert Error'); } catch (_) {}
-          }
+          } catch (e) { }
         });
-      } else {
-        try { logLinesToSheet([ 'Wiring: #revert-selection button NOT found' ], 'Revert Wire'); } catch (_) {}
-      }
-    } catch (e) { try { logLinesToSheet([ `Revert wiring error: ${String(e && e.message ? e.message : e)}` ], 'Revert Wire'); } catch (_) {} }
+      } else { }
+    } catch (e) { }
     // Hotkey removed per request (pane focus required). Use 'Revert Selection' button instead.
   } catch (e) {
     // ignore wiring errors
@@ -1064,7 +978,7 @@ async function handleSelectionChanged(event) {
               await saveSettingAsync(APPLIED_ADDRESSES_KEY, applied);
               // Last-chance: clear CF only on this single cell
               try { const cellCF = target.conditionalFormats; cellCF.clearAll(); await context.sync(); } catch (_) { /* ignore */ }
-              await appendLogsInContext(context, [ `Auto-clear: yellow cell now equals baseline — deleted=${removedCount}, remainingTracked=${keep.length}` ], 'Callout');
+              
             } catch (_) { /* ignore */ }
             return; // do not show tooltip
           }
@@ -1087,9 +1001,7 @@ async function handleSelectionChanged(event) {
       }
       // If both strings are empty, do not show
       if (!newText && !oldText) {
-        await appendLogsInContext(context, [
-          `Selection '${sheetName}!${addr}': empty display — skipping tooltip`
-        ], 'Callout');
+        
         return;
       }
       // Respect existing data validation if present
@@ -1109,11 +1021,7 @@ async function handleSelectionChanged(event) {
           try { dv.inputMessage = { showInputMessage: true, title: 'New / Old', message: `New: ${newText}\nOld: ${oldText}` }; } catch (_) { /* ignore */ }
         }
         activeCallout = { sheetName, address: addr, weAddedValidation: true };
-      } catch (e) {
-        await appendLogsInContext(context, [
-          `Tooltip set failed on '${sheetName}!${addr}': ${String(e && e.message ? e.message : e)}`
-        ], 'Callout Error');
-      }
+      } catch (e) { }
       await context.sync();
     });
   } catch (_) { /* ignore */ }
