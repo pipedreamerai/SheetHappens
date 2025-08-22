@@ -570,9 +570,9 @@ async function applyDiffOnActivation() {
       // Pre-clean overlays from our previous run:
       // 1) Prefer targeted deletion using stored rectangles for this sheet (fastest)
       // 2) Fallback to sweeping the used range once (slower, for first run or legacy leftovers)
-  const prevRects = Array.isArray(applied[name]) ? applied[name] : [];
-  const colorSet = new Set([GREEN_COLOR, RED_COLOR, ORANGE_COLOR, OVERLAY_COLOR].map(normalizeColor));
-  if (prevRects.length) {
+      const prevRects = Array.isArray(applied[name]) ? applied[name] : [];
+      const colorSet = new Set([GREEN_COLOR, RED_COLOR, ORANGE_COLOR, OVERLAY_COLOR].map(normalizeColor));
+      if (prevRects.length) {
         try { await deleteTaggedOverlaysForAddresses(context, active, prevRects, colorSet); } catch (_) {}
       } else {
         const u = active.getUsedRange(); // include formatting so CF-only overlays are sweepable
@@ -1285,33 +1285,8 @@ async function revertSelectedCellIfDiff() {
       // Force recalc once after the batch
       try { ws.calculate(Excel.CalculationType.recalculate); } catch (_) {}
 
-      // Remove overlays only for changed cells (batched)
-      try {
-        const applied = getSetting(APPLIED_ADDRESSES_KEY) || {};
-        const sheetApplied = Array.isArray(applied[sheetName]) ? applied[sheetName] : [];
-        const toDeleteAddrs = new Set();
-        const keep = [];
-        for (const a of sheetApplied) {
-          let intersects = false;
-          for (const cc of changedCells) {
-            if (a1AddressContainsCell(a, cc.r, cc.c)) { intersects = true; break; }
-          }
-          if (intersects) {
-            toDeleteAddrs.add(a);
-          } else {
-            keep.push(a);
-          }
-        }
-        // Execute deletions on intersecting CF ranges in one batch
-        await deleteTaggedOverlaysForAddresses(
-          context,
-          ws,
-          Array.from(toDeleteAddrs.values()),
-          new Set([GREEN_COLOR, RED_COLOR, ORANGE_COLOR, OVERLAY_COLOR].map(normalizeColor))
-        );
-        applied[sheetName] = keep;
-        await saveSettingAsync(APPLIED_ADDRESSES_KEY, applied);
-      } catch (e) { }
+      // Intentionally do not remove conditional formats during revert.
+      // Reverting only writes values/formulas; overlays are cleared by the separate "Clear diff formatting" action.
 
       await context.sync();
     });
