@@ -30,7 +30,7 @@ Compare your current Excel workbook against a baseline (another .xlsx or a saved
 
 1. Download the production manifest: [Download `manifest.xml`](https://raw.githubusercontent.com/pipedreamerai/SheetHappens/main/manifest.xml)
 2. macOS (Excel Desktop)
-   - Copy `manifest.xml` to `~/Library/Containers/com.microsoft.Excel/Data/Documents/wef/` (create the `wef` folder if it doesn’t exist), then restart Excel.
+   - Copy `docs/addin/manifest.xml` to `~/Library/Containers/com.microsoft.Excel/Data/Documents/wef/` (create the `wef` folder if it doesn’t exist), then restart Excel.
 3. Windows or Excel 365
    - Sideload the add-in (Worked for me on Excel 365 by going to Add-ins -> More Add-ins -> My Add-ins -> Upload My Add-in and then selecting the manifest file)
 4. Open any workbook. In the Home tab, you should see the command group “SheetHappens”. Click “SheetHappens” to open the task pane.
