@@ -13,20 +13,27 @@ function normFormula(f) {
   return f.trim().toUpperCase();
 }
 
-// Normalize text values coming from different sources (Office.js vs SheetJS) so
-// visually identical strings compare equal.
-// - Convert Windows/Mac line endings ("\r\n" or "\r") to "\n"
-// - Convert non-breaking spaces (\u00A0) to regular spaces
-// - Trim leading/trailing whitespace
-function normTextForCompare(value) {
-  // If it's not a string, return as-is so numbers/booleans compare normally.
-  if (typeof value !== "string") return value;
-  // Replace CRLF and CR with LF to unify line breaks across platforms/parsers.
-  let out = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  // Replace non-breaking spaces with regular spaces so visually identical text matches.
-  out = out.replace(/\u00A0/g, " ");
-  // Trim to ignore inconsequential leading/trailing whitespace.
-  return out.trim();
+// Normalize text to handle differences between uploaded files and snapshots
+// This handles invisible Unicode differences that look identical in Excel
+function normalizeText(text) {
+  if (typeof text !== "string") return text;
+  
+  return text
+    .trim() // Remove leading/trailing whitespace
+    // Normalize Unicode to NFC form (combines characters consistently)
+    .normalize('NFC')
+    // Replace various Unicode whitespace with regular spaces
+    .replace(/[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]/g, ' ')
+    // Replace zero-width characters
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    // Normalize newlines to spaces (Excel often stores these as spaces)
+    .replace(/[\r\n]+/g, ' ')
+    // Collapse multiple spaces to single space
+    .replace(/\s+/g, ' ')
+    // Normalize quotes (smart quotes to straight quotes)
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .trim(); // Final trim in case normalization added spaces
 }
 
 function isBlankCell(cell) {
@@ -59,12 +66,32 @@ function classifyCell(a, b) {
   const af = normFormula(a.f);
   const bf = normFormula(b.f);
   if (af !== bf) {
-    return CODE_FORMULA; // any formula text difference (including one side no formula)
+    // Special case: if one side has a formula and the other doesn't, but they represent the same value
+    // Check if the formula result equals the literal value
+    if ((af !== "" && bf === "") || (af === "" && bf !== "")) {
+      // One side has formula, other side has no formula
+      // We'll let this fall through to value comparison instead of treating as formula change
+    } else {
+      return CODE_FORMULA; // any formula text difference (including one side no formula)
+    }
   }
   // Same formula text; compare values
-  // Normalize strings by trimming; numbers/booleans compare directly
-  const av = normTextForCompare(a.v);
-  const bv = normTextForCompare(b.v);
+  // Handle case where one side is string and other is object with string value
+  let aValue = a.v;
+  let bValue = b.v;
+  
+  // Convert objects to strings if they contain string data
+  if (typeof aValue === "object" && aValue !== null && typeof aValue.toString === "function") {
+    aValue = aValue.toString();
+  }
+  if (typeof bValue === "object" && bValue !== null && typeof bValue.toString === "function") {
+    bValue = bValue.toString();
+  }
+  
+  // Normalize strings to handle Unicode differences between uploaded files and snapshots
+  const av = typeof aValue === "string" ? normalizeText(aValue) : aValue;
+  const bv = typeof bValue === "string" ? normalizeText(bValue) : bValue;
+  
   if (av === bv) return CODE_NONE;
   // If both are literals (no formula), treat as explicit change (orange)
   if (af === "" /* and bf === "" by equality above */) return CODE_FORMULA;
@@ -126,6 +153,7 @@ export function diffWorkbooks(curr, base) {
         const aCell = (ar >= 0 && ac >= 0 && ar < aRows && ac < aCols) ? getCell(curr, ai, ar, ac) : { v: null, f: null, t: "Empty" };
         const bCell = (br >= 0 && bc >= 0 && br < bRows && bc < bCols) ? getCell(base, bi, br, bc) : { v: null, f: null, t: "Empty" };
         const code = classifyCell(aCell, bCell);
+        
         if (code !== CODE_NONE) {
           const rr = rAbs - baseRow;
           const cc = cAbs - baseCol;

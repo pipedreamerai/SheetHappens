@@ -455,6 +455,7 @@ function wireRunCrossWorkbookSummary() {
           const parts = [`${diff.summary.total.changedSheets} changed sheets`];
           if (addedSheets.length) parts.push(`${addedSheets.length} added`);
           if (removedSheets.length) parts.push(`${removedSheets.length} removed`);
+          
           msg.textContent = `Compared against ${baseName}: ${parts.join(' · ')}`;
         } catch (_) {
           msg.textContent = `Compared against ${baseName}: ${diff.summary.total.changedSheets} changed sheets`;
@@ -1143,12 +1144,26 @@ async function handleSelectionChanged(event) {
       const currF = (target.formulas && target.formulas[0] ? target.formulas[0][0] : null);
       const currCell = { v: currVal, f: typeof currF === 'string' ? currF : null };
       const baseCell = getBaselineCellValue(sheetName, pos.row, pos.col);
-      // If this is a yellow cell (value-only change) but the value now equals baseline, remove the overlay
-      try {
-        if (code === 3) {
-          const cv = (typeof currCell.v === 'string') ? currCell.v.trim() : currCell.v;
-          const bv = (typeof baseCell.v === 'string') ? baseCell.v.trim() : baseCell.v;
-          if (cv === bv) {
+              // If this is a yellow cell (value-only change) but the value now equals baseline, remove the overlay
+        try {
+          if (code === 3) {
+            // Use same normalization as diff comparison
+            const normalizeText = (text) => {
+              if (typeof text !== 'string') return text;
+              return text
+                .trim()
+                .normalize('NFC')
+                .replace(/[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]/g, ' ')
+                .replace(/[\u200B-\u200D\uFEFF]/g, '')
+                .replace(/[\r\n]+/g, ' ')
+                .replace(/\s+/g, ' ')
+                .replace(/[\u2018\u2019]/g, "'")
+                .replace(/[\u201C\u201D]/g, '"')
+                .trim();
+            };
+            const cv = (typeof currCell.v === 'string') ? normalizeText(currCell.v) : currCell.v;
+            const bv = (typeof baseCell.v === 'string') ? normalizeText(baseCell.v) : baseCell.v;
+            if (cv === bv) {
             // Targeted cleanup like revert path
             try {
               const applied = getSetting(APPLIED_ADDRESSES_KEY) || {};
