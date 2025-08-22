@@ -13,6 +13,22 @@ function normFormula(f) {
   return f.trim().toUpperCase();
 }
 
+// Normalize text values coming from different sources (Office.js vs SheetJS) so
+// visually identical strings compare equal.
+// - Convert Windows/Mac line endings ("\r\n" or "\r") to "\n"
+// - Convert non-breaking spaces (\u00A0) to regular spaces
+// - Trim leading/trailing whitespace
+function normTextForCompare(value) {
+  // If it's not a string, return as-is so numbers/booleans compare normally.
+  if (typeof value !== "string") return value;
+  // Replace CRLF and CR with LF to unify line breaks across platforms/parsers.
+  let out = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  // Replace non-breaking spaces with regular spaces so visually identical text matches.
+  out = out.replace(/\u00A0/g, " ");
+  // Trim to ignore inconsequential leading/trailing whitespace.
+  return out.trim();
+}
+
 function isBlankCell(cell) {
   // cell: { v, f, t }
   const hasFormula = typeof cell.f === "string" && cell.f.startsWith("=");
@@ -47,8 +63,8 @@ function classifyCell(a, b) {
   }
   // Same formula text; compare values
   // Normalize strings by trimming; numbers/booleans compare directly
-  const av = typeof a.v === "string" ? a.v.trim() : a.v;
-  const bv = typeof b.v === "string" ? b.v.trim() : b.v;
+  const av = normTextForCompare(a.v);
+  const bv = normTextForCompare(b.v);
   if (av === bv) return CODE_NONE;
   // If both are literals (no formula), treat as explicit change (orange)
   if (af === "" /* and bf === "" by equality above */) return CODE_FORMULA;
