@@ -161,6 +161,99 @@ async function deleteTaggedOverlaysInRange(context, range, colors, options) {
   }
 }
 
+// Batched deletion of tagged overlays across many addresses in a single worksheet.
+// Loads CF collections and their properties in two syncs, then deletes in one batch.
+async function deleteTaggedOverlaysForAddresses(context, worksheet, addresses, colors) {
+  try {
+    if (!addresses || !addresses.length) return 0;
+    const entries = [];
+    // First pass: queue loads of CF collections per address
+    for (const addr of addresses) {
+      try {
+        const range = worksheet.getRange(addr);
+        const cfs = range.conditionalFormats;
+        try { cfs.load('items/type'); } catch (_) {}
+        entries.push({ addr, range, cfs, items: [], deleted: 0 });
+      } catch (_) { /* ignore bad addr */ }
+    }
+    try { await context.sync(); } catch (_) { /* tolerate */ }
+
+    // Second pass: queue loads of properties for each CF item, track back to entry
+    for (const entry of entries) {
+      const list = (entry.cfs && entry.cfs.items) || [];
+      entry.items = list;
+      for (const cf of list) {
+        try { cf.load('format/fill/color,custom/format/fill/color,cellValue/format/fill/color,custom/rule/formula,cellValue/rule'); } catch (_) {}
+      }
+    }
+    try { await context.sync(); } catch (_) { /* tolerate */ }
+
+    // Third pass: decide and delete, count per entry
+    let totalDeleted = 0;
+    for (const entry of entries) {
+      for (const cf of entry.items) {
+        try {
+          let shouldDelete = false;
+          // Color-based tag match
+          try {
+            let col = null;
+            try { col = cf.format && cf.format.fill ? cf.format.fill.color : null; } catch (_) {}
+            if (!col) { try { col = cf.custom && cf.custom.format && cf.custom.format.fill ? cf.custom.format.fill.color : null; } catch (_) {}
+            }
+            if (!col) { try { col = cf.cellValue && cf.cellValue.format && cf.cellValue.format.fill ? cf.cellValue.format.fill.color : null; } catch (_) {}
+            }
+            if (col && colors && colors.has(normalizeColor(col))) shouldDelete = true;
+          } catch (_) {}
+
+          // Rule-based tag match
+          if (!shouldDelete) {
+            try {
+              if (cf.type === Excel.ConditionalFormatType.custom) {
+                const f = (cf.custom && cf.custom.rule && cf.custom.rule.formula) || '';
+                const norm = String(f).trim().replace(/^=/, '').toUpperCase();
+                if (norm === 'TRUE') shouldDelete = true;
+              } else if (cf.type === Excel.ConditionalFormatType.cellValue) {
+                const rule = cf.cellValue && cf.cellValue.rule;
+                const op = rule && rule.operator ? String(rule.operator).toLowerCase() : '';
+                const f1 = rule && rule.formula1 ? String(rule.formula1) : '';
+                if (op === 'greaterthan' && f1 === '-1') shouldDelete = true;
+              }
+            } catch (_) {}
+          }
+
+          if (shouldDelete) { cf.delete(); entry.deleted++; totalDeleted++; }
+        } catch (_) { /* ignore */ }
+      }
+    }
+    try { await context.sync(); } catch (_) {}
+
+    // Final pass: for any entry with zero matched deletions, clear CF in that address as a targeted fallback
+    for (const entry of entries) {
+      try {
+        if (entry.deleted === 0) {
+          // Use our robust per-range deletion with rule match + brutal fallback
+          try {
+            await deleteTaggedOverlaysInRange(
+              context,
+              entry.range,
+              colors,
+              { matchRuleTypes: true, brutal: true }
+            );
+          } catch (_) {
+            // Last-resort: try clearAll
+            try { entry.range.conditionalFormats.clearAll(); } catch (_) {}
+          }
+        }
+      } catch (_) { /* ignore */ }
+    }
+    try { await context.sync(); } catch (_) {}
+
+    return totalDeleted;
+  } catch (_) {
+    return 0;
+  }
+}
+
 // Removed aggressive color-based clearing of direct fills to avoid wiping user formatting.
 
 function wireArchiveSnapshot() {
@@ -342,7 +435,6 @@ function wireRunCrossWorkbookSummary() {
         baseName = rec.name || baseName;
       }
   const diff = diffWorkbooks(current, baselineModel);
-  await writeSummaryToLogs(diff, baseName);
   // Cache diff for lazy per-sheet formatting
   await cacheDiffForLazyApply(diff);
   
@@ -351,37 +443,35 @@ function wireRunCrossWorkbookSummary() {
   lastBaselineModelMem = baselineModel;
   
   await applyTabColors(diff);
+  // Apply full-sheet green overlays for sheets that are entirely new
+  try { await applyAddedSheetOverlays(diff); } catch (_) {}
   // Immediately apply formatting for the currently active sheet
   
   await applyDiffOnActivation();
-      if (msg) msg.textContent = `Compared against ${baseName}: ${diff.summary.total.changedSheets} changed sheets`;
+      if (msg) {
+        try {
+          const addedSheets = Object.entries(diff.sheetStatus || {}).filter(([, s]) => s === 'added').map(([n]) => n);
+          const removedSheets = Object.entries(diff.sheetStatus || {}).filter(([, s]) => s === 'removed').map(([n]) => n);
+          const parts = [`${diff.summary.total.changedSheets} changed sheets`];
+          if (addedSheets.length) parts.push(`${addedSheets.length} added`);
+          if (removedSheets.length) parts.push(`${removedSheets.length} removed`);
+          msg.textContent = `Compared against ${baseName}: ${parts.join(' · ')}`;
+        } catch (_) {
+          msg.textContent = `Compared against ${baseName}: ${diff.summary.total.changedSheets} changed sheets`;
+        }
+      }
     } catch (e) {
       if (msg) msg.textContent = "Failed to compute diff: " + String(e && e.message ? e.message : e);
     }
   });
 }
 
-// Logging disabled for production UI
-function appendToDevLogs(_) { /* no-op */ }
-
-async function writeSummaryToLogs(diff, baseName) {
-  const ts = new Date().toISOString();
-  // In production UI, we no longer append verbose logs to the pane.
-  // Keep a concise console summary for developers.
-  try {
-    console.log(`[${ts}] Cross-workbook diff summary vs ${baseName}`);
-    console.log(`Total: +${diff.summary.total.add} / -${diff.summary.total.remove} / value ${diff.summary.total.value} / formula ${diff.summary.total.formula} | changed sheets: ${diff.summary.total.changedSheets}`);
-  } catch (_) {}
-}
-
-async function logLinesToSheet(_) { /* no-op */ }
-
-// In-context logger to avoid nested Excel.run; now writes to console
-function appendLogsInContext() { return Promise.resolve(); }
+// Logging utilities removed for production UI
 
 // ===== Lazy per-sheet diff formatting =====
 const LAST_DIFF_KEY = 'cc_last_diff_cache_v1';
 const APPLIED_ADDRESSES_KEY = 'cc_applied_addresses_v1';
+const CREATED_REMOVED_SHEETS_KEY = 'cc_created_removed_sheets_v1';
 let lastDiffMem = null; // in-memory diff for immediate use
 let diffEnabled = false; // whether to apply/generate overlays
 // Retain baseline model in memory for selection callouts
@@ -393,6 +483,7 @@ let selectionHandlerRef = null; // EventHandler removal token
 async function cacheDiffForLazyApply(diff) {
   // Store a compact version: bySheet with rows, cols, and a base64 of cells buffer
   const bySheet = {};
+  const createdRemoved = { added: [], removed: [] };
   for (const [name, s] of Object.entries(diff.bySheet)) {
     bySheet[name] = {
       rows: s.rows,
@@ -400,6 +491,13 @@ async function cacheDiffForLazyApply(diff) {
       cells: btoa(String.fromCharCode.apply(null, Array.from(s.cells))),
     };
   }
+  // Track added/removed sheet names for messaging and overlays
+  try {
+    for (const [name, status] of Object.entries(diff.sheetStatus || {})) {
+      if (status === 'added') createdRemoved.added.push(name);
+      else if (status === 'removed') createdRemoved.removed.push(name);
+    }
+  } catch (_) {}
   // Keep in memory as well
   lastDiffMem = { bySheet: diff.bySheet };
   try {
@@ -407,6 +505,8 @@ async function cacheDiffForLazyApply(diff) {
   } catch (_) { /* ignore */ }
   // Reset applied addresses tracking
   await saveSettingAsync(APPLIED_ADDRESSES_KEY, {});
+  // Persist created/removed for later use
+  try { await saveSettingAsync(CREATED_REMOVED_SHEETS_KEY, createdRemoved); } catch (_) {}
 }
 
 function restoreCachedDiff() {
@@ -455,7 +555,7 @@ async function applyDiffOnActivation() {
       
       const s = cached.bySheet[name];
       if (!s) {
-        
+        // No per-cell diff for this sheet; it might be a newly added sheet (green tab) or unchanged.
         return;
       }
       // Build address runs per code and apply
@@ -494,27 +594,64 @@ async function applyDiffOnActivation() {
 // Original direct-fill snapshotting has been removed; overlays are CF-only
 
 function buildAddressGroups(sheetDiff) {
-  // Returns { add: [A1:A3,...], remove: [...], value: [...], formula: [...] }
+  // Returns merged rectangles per code as A1 ranges: { add: [A1:D5, ...], remove: [...], value: [...], formula: [...] }
+  // Why rectangles? Creating one CF per row-run is expensive on large sheets. By merging identical
+  // horizontal runs across consecutive rows, we create far fewer CF rules, making apply/clear much faster.
   const { rows, cols, cells } = sheetDiff;
-  const out = { add: [], remove: [], value: [], formula: [] };
-  for (let r = 0; r < rows; r++) {
+
+  // Helper to collect horizontal segments for a given row and code
+  function collectRowSegments(rowIndex, code) {
+    // Build [c1, c2] segments where the code matches consecutively on this row
+    const segs = [];
     let c = 0;
     while (c < cols) {
-      const idx = r * cols + c;
-      const code = cells[idx];
-      if (!code) { c++; continue; }
-      // extend horizontally for this code
+      const idx = rowIndex * cols + c;
+      if (cells[idx] !== code) { c++; continue; }
       let c2 = c;
-      while (c2 + 1 < cols && cells[r * cols + (c2 + 1)] === code) c2++;
-      const addr = toA1(r, c, r, c2);
-      if (code === 1) out.add.push(addr);
-      else if (code === 2) out.remove.push(addr);
-      else if (code === 3) out.value.push(addr);
-      else if (code === 4) out.formula.push(addr);
+      while (c2 + 1 < cols && cells[rowIndex * cols + (c2 + 1)] === code) c2++;
+      segs.push([c, c2]);
       c = c2 + 1;
     }
+    return segs;
   }
-  return out;
+
+  // Merge segments vertically into rectangles for a specific code
+  function mergeRectanglesForCode(code) {
+    const rectangles = []; // each: { r1, c1, r2, c2 }
+    let prevRowOpen = new Map(); // key "c1,c2" -> rect
+    for (let r = 0; r < rows; r++) {
+      const segs = collectRowSegments(r, code);
+      const nextRowOpen = new Map();
+      // Try to extend previous rectangles when the same [c1,c2] segment appears in this row
+      for (const [c1, c2] of segs) {
+        const key = `${c1},${c2}`;
+        if (prevRowOpen.has(key)) {
+          // Extend existing rectangle downward
+          const rect = prevRowOpen.get(key);
+          rect.r2 = r;
+          nextRowOpen.set(key, rect);
+          prevRowOpen.delete(key);
+        } else {
+          // Start a new rectangle at this row
+          nextRowOpen.set(key, { r1: r, c1, r2: r, c2 });
+        }
+      }
+      // Any rectangles in prevRowOpen that did not continue should be finalized
+      for (const rect of prevRowOpen.values()) rectangles.push(rect);
+      prevRowOpen = nextRowOpen;
+    }
+    // Finalize remaining open rectangles from the last row
+    for (const rect of prevRowOpen.values()) rectangles.push(rect);
+    return rectangles.map((rc) => toA1(rc.r1, rc.c1, rc.r2, rc.c2));
+  }
+
+  // Build merged rectangles per code
+  return {
+    add: mergeRectanglesForCode(1),
+    remove: mergeRectanglesForCode(2),
+    value: mergeRectanglesForCode(3),
+    formula: mergeRectanglesForCode(4),
+  };
 }
 
 function toA1(r1, c1, r2, c2) {
@@ -619,20 +756,13 @@ function wireClearDiffFormatting() {
             const addrs = Array.isArray(applied[ws.name]) ? applied[ws.name] : [];
             let totalDeleted = 0;
             if (addrs.length) {
-              // Target known applied ranges first (covers CF-only cells not in used range)
-              const sample = addrs.slice(0, Math.min(addrs.length, 200));
-              for (const addr of sample) {
-                try {
-                  const r = ws.getRange(addr);
-                  totalDeleted += await deleteTaggedOverlaysInRange(context, r, colorSet, { matchRuleTypes: true, brutal: true });
-                } catch (_) { /* ignore */ }
-              }
+              // Target known rectangles in a single batched pass
+              totalDeleted += await deleteTaggedOverlaysForAddresses(context, ws, addrs, colorSet);
             }
-            // Also sweep used range to catch any residual overlays
+            // Always sweep used range once to catch any residual overlays (safe color/rule match only)
             try {
               const u = ws.getUsedRange();
               u.load(['rowCount','columnCount']);
-              // eslint-disable-next-line office-addins/no-context-sync-in-loop
               await context.sync();
               const rows = u.rowCount || 0;
               const cols = u.columnCount || 0;
@@ -673,19 +803,90 @@ async function applyTabColors(diff) {
     await context.sync();
     for (const ws of wsCol.items) {
       const s = diff.bySheet[ws.name];
-      if (!s || !s.counts) continue;
-      const { add, remove, value, formula } = s.counts;
-  let color = null;
-  if (remove > 0) color = RED_COLOR;
-  else if (formula > 0) color = ORANGE_COLOR;
-  else if (value > 0) color = OVERLAY_COLOR; // yellow
-  else if (add > 0) color = GREEN_COLOR;
+      const status = diff.sheetStatus ? diff.sheetStatus[ws.name] : undefined;
+      let color = null;
+      if (status === 'added') {
+        // Entirely new sheet in current workbook
+        color = GREEN_COLOR;
+      } else if (status === 'removed') {
+        // A sheet that existed in baseline but no longer exists now cannot be colored here;
+        // we'll handle messaging and overlays separately.
+      } else if (s && s.counts) {
+        const { add, remove, value, formula } = s.counts;
+        if (remove > 0) color = RED_COLOR;
+        else if (formula > 0) color = ORANGE_COLOR;
+        else if (value > 0) color = OVERLAY_COLOR; // yellow
+        else if (add > 0) color = GREEN_COLOR;
+      } else {
+        // no diff info; leave default color
+      }
       try {
         ws.tabColor = color;
       } catch (_) {
         // ignore if not supported
       }
     }
+    await context.sync();
+  });
+}
+
+// Apply a single green overlay covering the used range of any sheet marked as 'added'
+async function applyAddedSheetOverlays(diff) {
+  await Excel.run(async (context) => {
+    const wb = context.workbook;
+    const wsCol = wb.worksheets;
+    wsCol.load("items/name");
+    await context.sync();
+    const added = new Map(); // name -> worksheet
+    for (const ws of wsCol.items) {
+      const status = diff.sheetStatus ? diff.sheetStatus[ws.name] : undefined;
+      if (status === 'added') added.set(ws.name, ws);
+    }
+    if (added.size === 0) return;
+    // Load used ranges for all added sheets
+    const usedRanges = [];
+    for (const [name, ws] of added) {
+      const u = ws.getUsedRangeOrNullObject();
+      u.load(["address", "rowCount", "columnCount"]);
+      usedRanges.push({ name, ws, u });
+    }
+    await context.sync();
+    // Build and apply CF overlays, then record addresses
+    const applied = getSetting(APPLIED_ADDRESSES_KEY) || {};
+    for (const item of usedRanges) {
+      try {
+        const { name, ws, u } = item;
+        if (u.isNullObject) continue;
+        const rows = u.rowCount || 0;
+        const cols = u.columnCount || 0;
+        if (!rows || !cols) continue;
+        // Normalize address to local A1 without sheet qualifier
+        let addr = u.address;
+        if (Array.isArray(addr)) addr = addr[0];
+        const rect = parseA1RangeToZeroBased(addr);
+        if (!rect) continue;
+        const localA1 = toA1(rect.r1, rect.c1, rect.r2, rect.c2);
+        // Apply CF overlay (custom TRUE, fallback to cellValue)
+        try {
+          const rg = ws.getRange(localA1);
+          try {
+            const cf = rg.conditionalFormats.add(Excel.ConditionalFormatType.custom);
+            cf.custom.rule.formula = "=TRUE";
+            try { cf.custom.format.fill.setSolidColor(GREEN_COLOR); }
+            catch (_) { try { cf.custom.format.fill.color = GREEN_COLOR; } catch (_) { try { cf.format.fill.color = GREEN_COLOR; } catch (_) {} } }
+          } catch (e1) {
+            const cf2 = rg.conditionalFormats.add(Excel.ConditionalFormatType.cellValue);
+            try { cf2.cellValue.format.fill.setSolidColor(GREEN_COLOR); } catch (_) { try { cf2.cellValue.format.fill.color = GREEN_COLOR; } catch (_) {} }
+            cf2.cellValue.rule = { operator: Excel.ConditionalCellValueOperator.greaterThan, formula1: "-1" };
+          }
+          // Track applied address for later cleanup
+          const arr = Array.isArray(applied[name]) ? applied[name] : [];
+          if (!arr.includes(localA1)) arr.push(localA1);
+          applied[name] = arr;
+        } catch (_) { /* ignore single-sheet failure */ }
+      } catch (_) { /* ignore */ }
+    }
+    try { await saveSettingAsync(APPLIED_ADDRESSES_KEY, applied); } catch (_) {}
     await context.sync();
   });
 }
@@ -1044,7 +1245,7 @@ async function revertSelectedCellIfDiff() {
       // Force recalc once after the batch
       try { ws.calculate(Excel.CalculationType.recalculate); } catch (_) {}
 
-      // Remove overlays only for changed cells
+      // Remove overlays only for changed cells (batched)
       try {
         const applied = getSetting(APPLIED_ADDRESSES_KEY) || {};
         const sheetApplied = Array.isArray(applied[sheetName]) ? applied[sheetName] : [];
@@ -1061,18 +1262,13 @@ async function revertSelectedCellIfDiff() {
             keep.push(a);
           }
         }
-        // Execute deletions on intersecting CF ranges
-        for (const a of toDeleteAddrs) {
-          try {
-            const rr = ws.getRange(a);
-            await deleteTaggedOverlaysInRange(
-              context,
-              rr,
-              new Set([GREEN_COLOR, RED_COLOR, ORANGE_COLOR, OVERLAY_COLOR].map(normalizeColor)),
-              { matchRuleTypes: true, brutal: true }
-            );
-          } catch (_) { /* ignore */ }
-        }
+        // Execute deletions on intersecting CF ranges in one batch
+        await deleteTaggedOverlaysForAddresses(
+          context,
+          ws,
+          Array.from(toDeleteAddrs.values()),
+          new Set([GREEN_COLOR, RED_COLOR, ORANGE_COLOR, OVERLAY_COLOR].map(normalizeColor))
+        );
         applied[sheetName] = keep;
         await saveSettingAsync(APPLIED_ADDRESSES_KEY, applied);
       } catch (e) { }
