@@ -574,8 +574,14 @@ async function applyDiffOnActivation() {
   const rows = u.rowCount || 0;
   const cols = u.columnCount || 0;
       if (rows && cols) {
-        const rect = active.getRangeByIndexes(0,0,rows,cols);
-        const deleted = await deleteTaggedOverlaysInRange(context, rect, new Set([GREEN_COLOR, RED_COLOR, ORANGE_COLOR, OVERLAY_COLOR].map(normalizeColor)));
+        // Use the used range directly instead of anchoring at A1.
+        // This avoids incorrect offsets when the used range starts at B2, etc.
+        const deleted = await deleteTaggedOverlaysInRange(
+          context,
+          u,
+          new Set([GREEN_COLOR, RED_COLOR, ORANGE_COLOR, OVERLAY_COLOR].map(normalizeColor)),
+          { matchRuleTypes: true }
+        );
         
       }
       const groups = buildAddressGroups(s);
@@ -778,8 +784,8 @@ function wireClearDiffFormatting() {
               const rows = u.rowCount || 0;
               const cols = u.columnCount || 0;
               if (rows && cols) {
-                const rect = ws.getRangeByIndexes(0,0,rows,cols);
-                totalDeleted += await deleteTaggedOverlaysInRange(context, rect, colorSet, { matchRuleTypes: true });
+                // Use the used range object directly; do not assume it begins at A1.
+                totalDeleted += await deleteTaggedOverlaysInRange(context, u, colorSet, { matchRuleTypes: true });
               }
             } catch (_) { /* ignore */ }
             
