@@ -488,6 +488,8 @@ async function cacheDiffForLazyApply(diff) {
     bySheet[name] = {
       rows: s.rows,
       cols: s.cols,
+      rowBase: Math.max(0, s.rowBase || 0),
+      colBase: Math.max(0, s.colBase || 0),
       cells: btoa(String.fromCharCode.apply(null, Array.from(s.cells))),
     };
   }
@@ -519,7 +521,7 @@ function restoreCachedDiff() {
     const bin = atob(s.cells);
     const arr = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-    bySheet[name] = { rows: s.rows, cols: s.cols, cells: arr };
+    bySheet[name] = { rows: s.rows, cols: s.cols, rowBase: Math.max(0, s.rowBase || 0), colBase: Math.max(0, s.colBase || 0), cells: arr };
   }
   return { bySheet };
 }
@@ -598,6 +600,9 @@ function buildAddressGroups(sheetDiff) {
   // Why rectangles? Creating one CF per row-run is expensive on large sheets. By merging identical
   // horizontal runs across consecutive rows, we create far fewer CF rules, making apply/clear much faster.
   const { rows, cols, cells } = sheetDiff;
+  // Base offsets map our diff grid (which may start at B2, etc.) back to absolute A1 coordinates
+  const rowBase = Math.max(0, sheetDiff.rowBase || 0); // newly-added: top-left absolute row
+  const colBase = Math.max(0, sheetDiff.colBase || 0); // newly-added: top-left absolute col
 
   // Helper to collect horizontal segments for a given row and code
   function collectRowSegments(rowIndex, code) {
@@ -642,7 +647,8 @@ function buildAddressGroups(sheetDiff) {
     }
     // Finalize remaining open rectangles from the last row
     for (const rect of prevRowOpen.values()) rectangles.push(rect);
-    return rectangles.map((rc) => toA1(rc.r1, rc.c1, rc.r2, rc.c2));
+    // Convert local rects to A1 using absolute offsets so overlays land in the right place
+    return rectangles.map((rc) => toA1(rc.r1, rc.c1, rc.r2, rc.c2, rowBase, colBase));
   }
 
   // Build merged rectangles per code
@@ -654,7 +660,7 @@ function buildAddressGroups(sheetDiff) {
   };
 }
 
-function toA1(r1, c1, r2, c2) {
+function toA1(r1, c1, r2, c2, rOff = 0, cOff = 0) {
   // zero-based to A1; rows add 1
   function colName(c) {
     let x = c + 1;
@@ -666,7 +672,12 @@ function toA1(r1, c1, r2, c2) {
     }
     return s;
   }
-  return `${colName(c1)}${r1 + 1}:${colName(c2)}${r2 + 1}`;
+  // Newly-added: apply absolute offsets so the A1 addresses point to real cells
+  const rr1 = r1 + rOff;
+  const cc1 = c1 + cOff;
+  const rr2 = r2 + rOff;
+  const cc2 = c2 + cOff;
+  return `${colName(cc1)}${rr1 + 1}:${colName(cc2)}${rr2 + 1}`;
 }
 
 async function applyGroupsToSheet(context, worksheet, groups, logFn) {
@@ -1005,10 +1016,15 @@ function getBaselineCellValue(sheetName, r, c) {
     if (!lastBaselineModelMem) return { v: null, f: null, t: 'Empty' };
     const sh = (lastBaselineModelMem.sheets || []).find((s) => s && s.name === sheetName);
     if (!sh) return { v: null, f: null, t: 'Empty' };
-    if (r >= (sh.rowCount || 0) || c >= (sh.columnCount || 0)) return { v: null, f: null, t: 'Empty' };
-    const v = sh.values && sh.values[r] ? sh.values[r][c] : null;
-    const f = sh.formulas && sh.formulas[r] ? sh.formulas[r][c] : null;
-    const t = sh.valueTypes && sh.valueTypes[r] ? (sh.valueTypes[r][c] || 'Empty') : 'Empty';
+    // Translate absolute worksheet coordinates to local used-range indices
+    const rOff = Math.max(0, sh.rowOffset || 0);
+    const cOff = Math.max(0, sh.colOffset || 0);
+    const rl = r - rOff;
+    const cl = c - cOff;
+    if (rl < 0 || cl < 0 || rl >= (sh.rowCount || 0) || cl >= (sh.columnCount || 0)) return { v: null, f: null, t: 'Empty' };
+    const v = sh.values && sh.values[rl] ? sh.values[rl][cl] : null;
+    const f = sh.formulas && sh.formulas[rl] ? sh.formulas[rl][cl] : null;
+    const t = sh.valueTypes && sh.valueTypes[rl] ? (sh.valueTypes[rl][cl] || 'Empty') : 'Empty';
     return { v, f, t };
   } catch (_) {
     return { v: null, f: null, t: 'Empty' };
@@ -1097,8 +1113,12 @@ async function handleSelectionChanged(event) {
       if (!s) return;
       const rows = s.rows || 0;
       const cols = s.cols || 0;
-      if (pos.row < 0 || pos.col < 0 || pos.row >= rows || pos.col >= cols) return;
-      const code = s.cells[pos.row * cols + pos.col];
+      const rBase = Math.max(0, s.rowBase || 0);
+      const cBase = Math.max(0, s.colBase || 0);
+      if (pos.row < rBase || pos.col < cBase || pos.row >= rBase + rows || pos.col >= cBase + cols) return;
+      const rLocal = pos.row - rBase;
+      const cLocal = pos.col - cBase;
+      const code = s.cells[rLocal * cols + cLocal];
       if (!code) return; // unchanged
       // Read current cell value/formula
       const target = ws.getRange(addr);
@@ -1210,23 +1230,28 @@ async function revertSelectedCellIfDiff() {
       const sheetDiff = cached.bySheet && cached.bySheet[sheetName];
       if (!sheetDiff) { return; }
       const { rows, cols, cells } = sheetDiff;
-      const r1 = Math.max(0, rect.r1);
-      const c1 = Math.max(0, rect.c1);
-      const r2 = Math.min(rows - 1, rect.r2);
-      const c2 = Math.min(cols - 1, rect.c2);
-      if (r1 > r2 || c1 > c2) { return; }
+      const rBase = Math.max(0, sheetDiff.rowBase || 0);
+      const cBase = Math.max(0, sheetDiff.colBase || 0);
+      // Clamp selection to the absolute bounds of the diff grid
+      const absR1 = Math.max(rBase, rect.r1);
+      const absC1 = Math.max(cBase, rect.c1);
+      const absR2 = Math.min(rBase + rows - 1, rect.r2);
+      const absC2 = Math.min(cBase + cols - 1, rect.c2);
+      if (absR1 > absR2 || absC1 > absC2) { return; }
 
       // Queue cell edits in one batch: for each cell in selection, apply baseline
       // Only revert add/remove/formula-changed cells (codes 1,2,4); skip value-only (3)
       const changedCells = [];
-      for (let r = r1; r <= r2; r++) {
-        for (let c = c1; c <= c2; c++) {
-          const code = cells[r * cols + c];
+      for (let rAbs = absR1; rAbs <= absR2; rAbs++) {
+        for (let cAbs = absC1; cAbs <= absC2; cAbs++) {
+          const rLocal = rAbs - rBase;
+          const cLocal = cAbs - cBase;
+          const code = cells[rLocal * cols + cLocal];
           if (!(code === 1 || code === 2 || code === 4)) continue;
-          const base = getBaselineCellValue(sheetName, r, c);
+          const base = getBaselineCellValue(sheetName, rAbs, cAbs);
           const baselineFormula = (typeof base.f === 'string' && base.f) ? base.f : null;
           const baselineValue = (base.v == null ? null : base.v);
-          const cellRange = ws.getRangeByIndexes(r, c, 1, 1);
+          const cellRange = ws.getRangeByIndexes(rAbs, cAbs, 1, 1);
           // Prefer formulas when present; else set literal or blank
           if (baselineFormula) {
             try { cellRange.formulas = [[baselineFormula]]; } catch (_) {}
@@ -1235,7 +1260,7 @@ async function revertSelectedCellIfDiff() {
           } else {
             try { cellRange.values = [[""]]; } catch (_) {}
           }
-          changedCells.push({ r, c });
+          changedCells.push({ r: rAbs, c: cAbs });
         }
       }
 

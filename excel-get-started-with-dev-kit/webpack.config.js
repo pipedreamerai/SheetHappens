@@ -5,7 +5,7 @@ const CopyWebpackPlugin = require("copy-webpack-plugin");
 const HtmlWebpackPlugin = require("html-webpack-plugin");
 
 const urlDev = "https://localhost:3000/";
-const urlProd = "https://pipedreamerai.github.io/excel_versioning/addin/"; // CHANGE THIS TO YOUR PRODUCTION DEPLOYMENT LOCATION
+const urlProd = "https://pipedreamerai.github.io/SheetHappens/addin/"; // CHANGE THIS TO YOUR PRODUCTION DEPLOYMENT LOCATION
 
 async function getHttpsOptions() {
   const httpsOptions = await devCerts.getHttpsServerOptions();

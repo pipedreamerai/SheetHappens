@@ -44,6 +44,8 @@ export function parseXlsxToModel(arrayBuffer) {
     const range = XLSX.utils.decode_range(ref);
     const rows = range.e.r - range.s.r + 1;
     const cols = range.e.c - range.s.c + 1;
+    const rowOffset = Math.max(0, range.s.r); // zero-based starting row in worksheet coordinates
+    const colOffset = Math.max(0, range.s.c); // zero-based starting column in worksheet coordinates
 
     const values = Array.from({ length: rows }, () => Array(cols).fill(null));
     const formulas = Array.from({ length: rows }, () => Array(cols).fill(null));
@@ -66,7 +68,7 @@ export function parseXlsxToModel(arrayBuffer) {
       values[r][c] = cell.v === undefined ? null : cell.v;
     }
 
-    model.sheets.push({ name, rowCount: rows, columnCount: cols, values, formulas, valueTypes });
+    model.sheets.push({ name, rowCount: rows, columnCount: cols, rowOffset, colOffset, values, formulas, valueTypes });
   }
 
   return model;
