@@ -382,7 +382,6 @@ function appendLogsInContext() { return Promise.resolve(); }
 // ===== Lazy per-sheet diff formatting =====
 const LAST_DIFF_KEY = 'cc_last_diff_cache_v1';
 const APPLIED_ADDRESSES_KEY = 'cc_applied_addresses_v1';
-const ORIGINAL_FILLS_KEY = 'cc_original_fills_v1'; // per-sheet map of original fills we overwrote
 let lastDiffMem = null; // in-memory diff for immediate use
 let diffEnabled = false; // whether to apply/generate overlays
 // Retain baseline model in memory for selection callouts
@@ -408,8 +407,6 @@ async function cacheDiffForLazyApply(diff) {
   } catch (_) { /* ignore */ }
   // Reset applied addresses tracking
   await saveSettingAsync(APPLIED_ADDRESSES_KEY, {});
-  // Reset original fills tracking for a fresh run
-  await saveSettingAsync(ORIGINAL_FILLS_KEY, {});
 }
 
 function restoreCachedDiff() {
@@ -494,46 +491,7 @@ async function applyDiffOnActivation() {
   }
 }
 
-// Snapshot the original fills for a sheet's addresses we are about to overwrite.
-// Stores only addresses with a non-null fill color and that haven't been captured yet.
-/* eslint-disable office-addins/call-sync-before-read */
-async function snapshotOriginalFillsForSheet(context, worksheet, sheetName, addresses) {
-  try {
-    if (!addresses || !addresses.length) return;
-    const orig = getSetting(ORIGINAL_FILLS_KEY) || {};
-    const existing = orig[sheetName] || [];
-    const seen = new Set(existing.map((e) => e.addr));
-    const ranges = [];
-    const addrRefs = [];
-    for (const addr of addresses) {
-      if (seen.has(addr)) continue;
-      // eslint-disable-next-line office-addins/call-sync-before-read
-      const rg = worksheet.getRange(addr);
-      rg.load(['format/fill/color']);
-      ranges.push(rg);
-      addrRefs.push(addr);
-    }
-    if (!ranges.length) return;
-    // eslint-disable-next-line office-addins/no-context-sync-in-loop
-    await context.sync();
-    const toStore = [];
-    for (let i = 0; i < ranges.length; i++) {
-      const rg = ranges[i];
-      try {
-        const col = normalizeColor(rg.format.fill.color);
-        if (col) toStore.push({ addr: addrRefs[i], color: col });
-      } catch (_) { /* ignore */ }
-    }
-    if (toStore.length) {
-      const updated = existing.concat(toStore);
-      orig[sheetName] = updated;
-      await saveSettingAsync(ORIGINAL_FILLS_KEY, orig);
-    }
-  } catch (_) {
-    // best-effort; ignore errors
-  }
-}
-/* eslint-enable office-addins/call-sync-before-read */
+// Original direct-fill snapshotting has been removed; overlays are CF-only
 
 function buildAddressGroups(sheetDiff) {
   // Returns { add: [A1:A3,...], remove: [...], value: [...], formula: [...] }
@@ -653,7 +611,6 @@ function wireClearDiffFormatting() {
         // Clear any active selection callout
         try { await clearActiveCallout(); } catch (_) {}
   const applied = getSetting(APPLIED_ADDRESSES_KEY) || {};
-  const originalFills = getSetting(ORIGINAL_FILLS_KEY) || {};
   const colorSet = new Set([GREEN_COLOR, RED_COLOR, ORANGE_COLOR, OVERLAY_COLOR].map(normalizeColor));
 
         for (const ws of wsCol.items) {
@@ -697,7 +654,6 @@ function wireClearDiffFormatting() {
         for (const ws of wsCol.items) { try { ws.tabColor = ""; } catch (_) { /* ignore */ } }
         // Wipe all tracking
         await saveSettingAsync(APPLIED_ADDRESSES_KEY, {});
-        await saveSettingAsync(ORIGINAL_FILLS_KEY, {});
       });
       // Now that we've used the stored addresses, clear the cached diff and in-memory copy
       await clearCachedDiff();
@@ -1027,7 +983,7 @@ async function handleSelectionChanged(event) {
   } catch (_) { /* ignore */ }
 }
 
-// Revert the currently selected cell to the baseline for green(1)/red(2)/orange(4) only
+// Revert the currently selected area (single cell or multi-cell) to the baseline for green(1)/red(2)/orange(4) only
 async function revertSelectedCellIfDiff() {
   try {
     if (!diffEnabled) {
@@ -1041,69 +997,86 @@ async function revertSelectedCellIfDiff() {
       const ws = wb.worksheets.getActiveWorksheet();
       ws.load(["name"]);
       const sel = wb.getSelectedRange();
-      sel.load(["address", "rowCount", "columnCount", "formulas", "values"]);
+      // Load selection details (address + shape). We won't rely on formulas/values here.
+      sel.load(["address", "rowCount", "columnCount"]);
       await context.sync();
-      if (sel.rowCount !== 1 || sel.columnCount !== 1) { return; }
       const sheetName = ws.name;
       let addr = sel.address;
-      // Normalize address: prefer local A1 without sheet qualifier and absolutes, single cell
       if (Array.isArray(addr)) addr = addr[0];
-      const pos = parseA1ToZeroBased(addr);
-      if (!pos) { return; }
+      // Parse rectangular selection like 'A1:D5' to zero-based bounds
+      const rect = parseA1RangeToZeroBased(addr);
+      if (!rect) { return; }
       const sheetDiff = cached.bySheet && cached.bySheet[sheetName];
       if (!sheetDiff) { return; }
       const { rows, cols, cells } = sheetDiff;
-      if (pos.row < 0 || pos.col < 0 || pos.row >= rows || pos.col >= cols) return;
-      const code = cells[pos.row * cols + pos.col];
-      if (!(code === 1 || code === 2 || code === 4)) { return; }
-      const target = ws.getRangeByIndexes(pos.row, pos.col, 1, 1);
-      // Determine baseline content
-      const base = getBaselineCellValue(sheetName, pos.row, pos.col);
-      const baselineFormula = (typeof base.f === 'string' && base.f) ? base.f : null;
-      const baselineValue = (base.v == null ? null : base.v);
-      // Apply baseline: prefer formula if present; otherwise set value; clear if both null
-      if (baselineFormula) {
-        try { target.formulas = [[baselineFormula]]; } catch (_) {}
-      } else if (baselineValue !== null) {
-        try { target.values = [[baselineValue]]; } catch (_) {}
-      } else {
-        // Revert deletion/addition to blank — set explicit empty value to ensure content is removed across hosts
-        try { target.values = [[""]]; } catch (_) {}
+      const r1 = Math.max(0, rect.r1);
+      const c1 = Math.max(0, rect.c1);
+      const r2 = Math.min(rows - 1, rect.r2);
+      const c2 = Math.min(cols - 1, rect.c2);
+      if (r1 > r2 || c1 > c2) { return; }
+
+      // Queue cell edits in one batch: for each cell in selection, apply baseline
+      // Only revert add/remove/formula-changed cells (codes 1,2,4); skip value-only (3)
+      const changedCells = [];
+      for (let r = r1; r <= r2; r++) {
+        for (let c = c1; c <= c2; c++) {
+          const code = cells[r * cols + c];
+          if (!(code === 1 || code === 2 || code === 4)) continue;
+          const base = getBaselineCellValue(sheetName, r, c);
+          const baselineFormula = (typeof base.f === 'string' && base.f) ? base.f : null;
+          const baselineValue = (base.v == null ? null : base.v);
+          const cellRange = ws.getRangeByIndexes(r, c, 1, 1);
+          // Prefer formulas when present; else set literal or blank
+          if (baselineFormula) {
+            try { cellRange.formulas = [[baselineFormula]]; } catch (_) {}
+          } else if (baselineValue !== null) {
+            try { cellRange.values = [[baselineValue]]; } catch (_) {}
+          } else {
+            try { cellRange.values = [[""]]; } catch (_) {}
+          }
+          changedCells.push({ r, c });
+        }
       }
-      // Force recalc for safety
+
+      // If nothing to do, return early
+      if (!changedCells.length) { return; }
+
+      // Force recalc once after the batch
       try { ws.calculate(Excel.CalculationType.recalculate); } catch (_) {}
-      // Remove CF overlays for this exact cell if we applied them earlier
+
+      // Remove overlays only for changed cells
       try {
         const applied = getSetting(APPLIED_ADDRESSES_KEY) || {};
         const sheetApplied = Array.isArray(applied[sheetName]) ? applied[sheetName] : [];
+        const toDeleteAddrs = new Set();
         const keep = [];
-        let removedCount = 0;
         for (const a of sheetApplied) {
-          if (a1AddressContainsCell(a, pos.row, pos.col)) {
-            try {
-              const rr = ws.getRange(a);
-              const deleted = await deleteTaggedOverlaysInRange(context, rr, new Set([GREEN_COLOR, RED_COLOR, ORANGE_COLOR, OVERLAY_COLOR].map(normalizeColor)), { matchRuleTypes: true, brutal: true });
-              removedCount += deleted;
-            } catch (_) { /* ignore */ }
+          let intersects = false;
+          for (const cc of changedCells) {
+            if (a1AddressContainsCell(a, cc.r, cc.c)) { intersects = true; break; }
+          }
+          if (intersects) {
+            toDeleteAddrs.add(a);
           } else {
             keep.push(a);
           }
         }
+        // Execute deletions on intersecting CF ranges
+        for (const a of toDeleteAddrs) {
+          try {
+            const rr = ws.getRange(a);
+            await deleteTaggedOverlaysInRange(
+              context,
+              rr,
+              new Set([GREEN_COLOR, RED_COLOR, ORANGE_COLOR, OVERLAY_COLOR].map(normalizeColor)),
+              { matchRuleTypes: true, brutal: true }
+            );
+          } catch (_) { /* ignore */ }
+        }
         applied[sheetName] = keep;
         await saveSettingAsync(APPLIED_ADDRESSES_KEY, applied);
-        // Last-chance: clear all CF strictly on this one cell to ensure highlight is gone
-        try {
-          const cellCF = target.conditionalFormats;
-          cellCF.clearAll();
-          await context.sync();
-        } catch (e2) {
-          
-        }
-      } catch (e) {
-        
-      }
-      // Verify read-back
-      try { target.load([ 'values', 'formulas' ]); await context.sync(); } catch (_) {}
+      } catch (e) { }
+
       await context.sync();
     });
   } catch (e) {
