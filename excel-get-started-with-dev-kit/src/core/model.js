@@ -23,8 +23,10 @@ export async function buildWorkbookModel(options = {}) {
       sheets: [],
     };
 
-    // Load used ranges for all sheets first to avoid syncing inside the loop
-    const usedRanges = items.map((ws) => ws.getUsedRangeOrNullObject());
+    // Load used ranges (valuesOnly) for all sheets first.
+    // valuesOnly=true ignores formatting-only regions (e.g., conditional formats),
+    // preventing Mac Excel from shifting the used range start to A1.
+    const usedRanges = items.map((ws) => ws.getUsedRangeOrNullObject(true));
     usedRanges.forEach((r) => r.load(["rowCount", "columnCount", "values", "formulas", "valueTypes", "address"]));
     await context.sync();
 

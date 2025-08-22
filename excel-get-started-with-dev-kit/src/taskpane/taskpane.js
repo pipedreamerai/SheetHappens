@@ -567,22 +567,23 @@ async function applyDiffOnActivation() {
         
         return; // already applied this session
       }
-      // Pre-clean any custom CF overlays that use our colors
-  const u = active.getUsedRange();
-  u.load(['rowCount','columnCount']);
-  await context.sync();
-  const rows = u.rowCount || 0;
-  const cols = u.columnCount || 0;
-      if (rows && cols) {
-        // Use the used range directly instead of anchoring at A1.
-        // This avoids incorrect offsets when the used range starts at B2, etc.
-        const deleted = await deleteTaggedOverlaysInRange(
-          context,
-          u,
-          new Set([GREEN_COLOR, RED_COLOR, ORANGE_COLOR, OVERLAY_COLOR].map(normalizeColor)),
-          { matchRuleTypes: true }
-        );
-        
+      // Pre-clean overlays from our previous run:
+      // 1) Prefer targeted deletion using stored rectangles for this sheet (fastest)
+      // 2) Fallback to sweeping the used range once (slower, for first run or legacy leftovers)
+  const prevRects = Array.isArray(applied[name]) ? applied[name] : [];
+  const colorSet = new Set([GREEN_COLOR, RED_COLOR, ORANGE_COLOR, OVERLAY_COLOR].map(normalizeColor));
+  if (prevRects.length) {
+        try { await deleteTaggedOverlaysForAddresses(context, active, prevRects, colorSet); } catch (_) {}
+      } else {
+        const u = active.getUsedRange(); // include formatting so CF-only overlays are sweepable
+        u.load(['rowCount','columnCount']);
+        await context.sync();
+        const rows = u.rowCount || 0;
+        const cols = u.columnCount || 0;
+        if (rows && cols) {
+          // Use the used range directly; do not assume it begins at A1.
+          try { await deleteTaggedOverlaysInRange(context, u, colorSet, { matchRuleTypes: true }); } catch (_) {}
+        }
       }
       const groups = buildAddressGroups(s);
       
@@ -683,7 +684,8 @@ function toA1(r1, c1, r2, c2, rOff = 0, cOff = 0) {
   const cc1 = c1 + cOff;
   const rr2 = r2 + rOff;
   const cc2 = c2 + cOff;
-  return `${colName(cc1)}${rr1 + 1}:${colName(cc2)}${rr2 + 1}`;
+  // Use absolute A1 refs to avoid any host re-anchoring quirks (e.g., Mac CF anchoring)
+  return `$${colName(cc1)}$${rr1 + 1}:$${colName(cc2)}$${rr2 + 1}`;
 }
 
 async function applyGroupsToSheet(context, worksheet, groups, logFn) {
@@ -696,23 +698,32 @@ async function applyGroupsToSheet(context, worksheet, groups, logFn) {
     let sampled = 0;
     for (const addr of addresses) {
       try {
-        const rg = worksheet.getRange(addr);
-        let appliedType = "custom";
+        // Build range by absolute indexes to avoid any host quirks with A1 anchoring
+        const rect = parseA1RangeToZeroBased(addr);
+        const rg = rect
+          ? worksheet.getRangeByIndexes(
+              rect.r1,
+              rect.c1,
+              rect.r2 - rect.r1 + 1,
+              rect.c2 - rect.c1 + 1
+            )
+          : worksheet.getRange(addr);
+        let appliedType = "cellValue";
+        // Try cellValue first to avoid Mac anchoring issues with custom rules
         try {
-          if (logFn && sampled < 3) await logFn([`CF(${label}): try custom on ${addr}`], 'CF Backend');
-          const cf = rg.conditionalFormats.add(Excel.ConditionalFormatType.custom);
-          cf.custom.rule.formula = "=TRUE";
-          // Prefer setting fill on the specific custom format; fall back as needed
-          try { cf.custom.format.fill.setSolidColor(color); }
-          catch (_) { try { cf.custom.format.fill.color = color; } catch (_) { try { cf.format.fill.color = color; } catch (_) { /* ignore */ } } }
+          if (logFn && sampled < 3) await logFn([`CF(${label}): try cellValue on ${addr}`], 'CF Backend');
+          const cf2 = rg.conditionalFormats.add(Excel.ConditionalFormatType.cellValue);
+          try { cf2.cellValue.format.fill.setSolidColor(color); } catch (_) { try { cf2.cellValue.format.fill.color = color; } catch (_) { /* ignore */ } }
+          cf2.cellValue.rule = { operator: Excel.ConditionalCellValueOperator.greaterThan, formula1: "-1" };
         } catch (e1) {
-          appliedType = "cellValue";
+          appliedType = "custom";
           try {
-            if (logFn && sampled < 3) await logFn([`CF(${label}): custom failed on ${addr}: ${String(e1 && e1.message ? e1.message : e1)}`], 'CF Backend');
-            if (logFn && sampled < 3) await logFn([`CF(${label}): try cellValue on ${addr}`], 'CF Backend');
-            const cf2 = rg.conditionalFormats.add(Excel.ConditionalFormatType.cellValue);
-            try { cf2.cellValue.format.fill.setSolidColor(color); } catch (_) { try { cf2.cellValue.format.fill.color = color; } catch (_) { /* ignore */ } }
-            cf2.cellValue.rule = { operator: Excel.ConditionalCellValueOperator.greaterThan, formula1: "-1" };
+            if (logFn && sampled < 3) await logFn([`CF(${label}): cellValue failed on ${addr}: ${String(e1 && e1.message ? e1.message : e1)}`], 'CF Backend');
+            if (logFn && sampled < 3) await logFn([`CF(${label}): try custom on ${addr}`], 'CF Backend');
+            const cf = rg.conditionalFormats.add(Excel.ConditionalFormatType.custom);
+            cf.custom.rule.formula = "=TRUE";
+            try { cf.custom.format.fill.setSolidColor(color); }
+            catch (_) { try { cf.custom.format.fill.color = color; } catch (_) { try { cf.format.fill.color = color; } catch (_) { /* ignore */ } } }
           } catch (e2) {
             if (logFn) await logFn([`CF(${label}) failed on ${addr}: ${String(e2 && e2.message ? e2.message : e2)}`], 'CF Backend');
             continue;
@@ -739,6 +750,8 @@ async function applyGroupsToSheet(context, worksheet, groups, logFn) {
     if (logFn) await logFn([`Applied ${created} CF overlay(s) for ${label}`], 'CF Backend');
     return created;
   };
+  // Prefer cellValue rule first on Mac: custom TRUE can occasionally anchor at A1 on some builds.
+  // We enforce this by trying cellValue before custom in applyCF below.
   const addN = await applyCF(groups.add, GREEN_COLOR, 'add');
   const remN = await applyCF(groups.remove, RED_COLOR, 'remove');
   const valN = await applyCF(groups.value, OVERLAY_COLOR, 'value');
@@ -778,14 +791,15 @@ function wireClearDiffFormatting() {
             }
             // Always sweep used range once to catch any residual overlays (safe color/rule match only)
             try {
-              const u = ws.getUsedRange();
+              const u = ws.getUsedRange(); // include formatting so CF-only overlays are sweepable
               u.load(['rowCount','columnCount']);
               await context.sync();
               const rows = u.rowCount || 0;
               const cols = u.columnCount || 0;
               if (rows && cols) {
                 // Use the used range object directly; do not assume it begins at A1.
-                totalDeleted += await deleteTaggedOverlaysInRange(context, u, colorSet, { matchRuleTypes: true });
+                // Enable brutal fallback to clear CF if tagged overlays aren't detectable post-revert.
+                totalDeleted += await deleteTaggedOverlaysInRange(context, u, colorSet, { matchRuleTypes: true, brutal: true });
               }
             } catch (_) { /* ignore */ }
             
@@ -860,10 +874,10 @@ async function applyAddedSheetOverlays(diff) {
       if (status === 'added') added.set(ws.name, ws);
     }
     if (added.size === 0) return;
-    // Load used ranges for all added sheets
+    // Load used ranges for all added sheets (valuesOnly to avoid formatting-only regions)
     const usedRanges = [];
     for (const [name, ws] of added) {
-      const u = ws.getUsedRangeOrNullObject();
+      const u = ws.getUsedRangeOrNullObject(true);
       u.load(["address", "rowCount", "columnCount"]);
       usedRanges.push({ name, ws, u });
     }
@@ -877,26 +891,21 @@ async function applyAddedSheetOverlays(diff) {
         const rows = u.rowCount || 0;
         const cols = u.columnCount || 0;
         if (!rows || !cols) continue;
-        // Normalize address to local A1 without sheet qualifier
+        // Compute absolute index rectangle from used range rows/cols (no A1 dependency)
+        // Note: Used range is local to sheet; top-left index is (r1,c1) as parsed from address.
         let addr = u.address;
         if (Array.isArray(addr)) addr = addr[0];
         const rect = parseA1RangeToZeroBased(addr);
         if (!rect) continue;
-        const localA1 = toA1(rect.r1, rect.c1, rect.r2, rect.c2);
-        // Apply CF overlay (custom TRUE, fallback to cellValue)
+        const r1 = rect.r1, c1 = rect.c1, h = rows, w = cols;
+        // Apply CF overlay via index ranges and cellValue rule to avoid A1 anchoring
         try {
-          const rg = ws.getRange(localA1);
-          try {
-            const cf = rg.conditionalFormats.add(Excel.ConditionalFormatType.custom);
-            cf.custom.rule.formula = "=TRUE";
-            try { cf.custom.format.fill.setSolidColor(GREEN_COLOR); }
-            catch (_) { try { cf.custom.format.fill.color = GREEN_COLOR; } catch (_) { try { cf.format.fill.color = GREEN_COLOR; } catch (_) {} } }
-          } catch (e1) {
-            const cf2 = rg.conditionalFormats.add(Excel.ConditionalFormatType.cellValue);
-            try { cf2.cellValue.format.fill.setSolidColor(GREEN_COLOR); } catch (_) { try { cf2.cellValue.format.fill.color = GREEN_COLOR; } catch (_) {} }
-            cf2.cellValue.rule = { operator: Excel.ConditionalCellValueOperator.greaterThan, formula1: "-1" };
-          }
-          // Track applied address for later cleanup
+          const rg = ws.getRangeByIndexes(r1, c1, h, w);
+          const cf2 = rg.conditionalFormats.add(Excel.ConditionalFormatType.cellValue);
+          try { cf2.cellValue.format.fill.setSolidColor(GREEN_COLOR); } catch (_) { try { cf2.cellValue.format.fill.color = GREEN_COLOR; } catch (_) {} }
+          cf2.cellValue.rule = { operator: Excel.ConditionalCellValueOperator.greaterThan, formula1: "-1" };
+          // Track applied address for later cleanup (store A1 with absolutes for consistency)
+          const localA1 = toA1(r1, c1, r1 + h - 1, c1 + w - 1);
           const arr = Array.isArray(applied[name]) ? applied[name] : [];
           if (!arr.includes(localA1)) arr.push(localA1);
           applied[name] = arr;
