@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0" xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="TaskPaneApp">
   <Id>bcd552f3-679e-4633-a62e-6c29f8cca01b</Id>
-  <Version>1.0.0.2</Version>
+  <Version>1.0.0.4</Version>
   <ProviderName>Pipedreamer</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
-  <DisplayName DefaultValue="What Changed?"/>
+  <DisplayName DefaultValue="SheetHappens"/>
   <Description DefaultValue="A template to get started."/>
-  <IconUrl DefaultValue="https://pipedreamerai.github.io/excel_versioning/addin/assets/icon-32.png"/>
-  <HighResolutionIconUrl DefaultValue="https://pipedreamerai.github.io/excel_versioning/addin/assets/icon-64.png"/>
+  <IconUrl DefaultValue="https://pipedreamerai.github.io/SheetHappens/addin/assets/icon-32.png"/>
+  <HighResolutionIconUrl DefaultValue="https://pipedreamerai.github.io/SheetHappens/addin/assets/icon-64.png"/>
   <SupportUrl DefaultValue="https://pipedreamerai.github.io/"/>
   <AppDomains>
     <AppDomain>https://pipedreamerai.github.io/</AppDomain>
@@ -16,7 +16,7 @@
     <Host Name="Workbook"/>
   </Hosts>
   <DefaultSettings>
-    <SourceLocation DefaultValue="https://pipedreamerai.github.io/excel_versioning/addin/taskpane.html"/>
+    <SourceLocation DefaultValue="https://pipedreamerai.github.io/SheetHappens/addin/taskpane.html"/>
   </DefaultSettings>
   <Permissions>ReadWriteDocument</Permissions>
   <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
@@ -61,22 +61,22 @@
     </Hosts>
     <Resources>
       <bt:Images>
-        <bt:Image id="Icon.16x16" DefaultValue="https://pipedreamerai.github.io/excel_versioning/addin/assets/icon-16.png"/>
-        <bt:Image id="Icon.32x32" DefaultValue="https://pipedreamerai.github.io/excel_versioning/addin/assets/icon-32.png"/>
-        <bt:Image id="Icon.80x80" DefaultValue="https://pipedreamerai.github.io/excel_versioning/addin/assets/icon-80.png"/>
+        <bt:Image id="Icon.16x16" DefaultValue="https://pipedreamerai.github.io/SheetHappens/addin/assets/icon-16.png"/>
+        <bt:Image id="Icon.32x32" DefaultValue="https://pipedreamerai.github.io/SheetHappens/addin/assets/icon-32.png"/>
+        <bt:Image id="Icon.80x80" DefaultValue="https://pipedreamerai.github.io/SheetHappens/addin/assets/icon-80.png"/>
       </bt:Images>
       <bt:Urls>
         <bt:Url id="GetStarted.LearnMoreUrl" DefaultValue="https://go.microsoft.com/fwlink/?LinkId=276812"/>
-        <bt:Url id="Taskpane.Url" DefaultValue="https://pipedreamerai.github.io/excel_versioning/addin/taskpane.html"/>
+        <bt:Url id="Taskpane.Url" DefaultValue="https://pipedreamerai.github.io/SheetHappens/addin/taskpane.html"/>
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="GetStarted.Title" DefaultValue="Get started with your sample add-in!"/>
-  <bt:String id="CommandsGroup.Label" DefaultValue="Versioning Tools"/>
-  <bt:String id="TaskpaneButton.Label" DefaultValue="Compare Sheets"/>
+  <bt:String id="CommandsGroup.Label" DefaultValue="SheetHappens"/>
+  <bt:String id="TaskpaneButton.Label" DefaultValue="SheetHappens"/>
       </bt:ShortStrings>
       <bt:LongStrings>
         <bt:String id="GetStarted.Description" DefaultValue="Your sample add-in loaded successfully. Go to the HOME tab and click the 'Show Taskpane' button to get started."/>
-  <bt:String id="TaskpaneButton.Tooltip" DefaultValue="Open the Compare Sheets task pane"/>
+  <bt:String id="TaskpaneButton.Tooltip" DefaultValue="Open SheetHappens"/>
       </bt:LongStrings>
     </Resources>
   </VersionOverrides>

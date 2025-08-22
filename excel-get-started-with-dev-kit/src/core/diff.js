@@ -80,20 +80,40 @@ export function diffWorkbooks(curr, base) {
     // Both present
     const as = curr.sheets[ai];
     const bs = base.sheets[bi];
-    const rows = Math.max(as.rowCount || 0, bs.rowCount || 0);
-    const cols = Math.max(as.columnCount || 0, bs.columnCount || 0);
+    // Determine absolute-space bounding box covering both used ranges
+    const aRowOff = Math.max(0, as.rowOffset || 0);
+    const aColOff = Math.max(0, as.colOffset || 0);
+    const bRowOff = Math.max(0, bs.rowOffset || 0);
+    const bColOff = Math.max(0, bs.colOffset || 0);
+    const aRows = Math.max(0, as.rowCount || 0);
+    const aCols = Math.max(0, as.columnCount || 0);
+    const bRows = Math.max(0, bs.rowCount || 0);
+    const bCols = Math.max(0, bs.columnCount || 0);
+    const baseRow = Math.min(aRowOff, bRowOff);
+    const baseCol = Math.min(aColOff, bColOff);
+    const endRow = Math.max(aRowOff + aRows, bRowOff + bRows);
+    const endCol = Math.max(aColOff + aCols, bColOff + bCols);
+    const rows = Math.max(0, endRow - baseRow);
+    const cols = Math.max(0, endCol - baseCol);
     const cells = new Uint8Array(rows * cols);
     let add = 0,
       remove = 0,
       value = 0,
       formula = 0;
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const a = getCell(curr, ai, r, c);
-        const b = getCell(base, bi, r, c);
-        const code = classifyCell(a, b);
+    for (let rAbs = baseRow; rAbs < baseRow + rows; rAbs++) {
+      for (let cAbs = baseCol; cAbs < baseCol + cols; cAbs++) {
+        // Map absolute coordinate to local indices within each model's used range
+        const ar = rAbs - aRowOff;
+        const ac = cAbs - aColOff;
+        const br = rAbs - bRowOff;
+        const bc = cAbs - bColOff;
+        const aCell = (ar >= 0 && ac >= 0 && ar < aRows && ac < aCols) ? getCell(curr, ai, ar, ac) : { v: null, f: null, t: "Empty" };
+        const bCell = (br >= 0 && bc >= 0 && br < bRows && bc < bCols) ? getCell(base, bi, br, bc) : { v: null, f: null, t: "Empty" };
+        const code = classifyCell(aCell, bCell);
         if (code !== CODE_NONE) {
-          const idx = r * cols + c;
+          const rr = rAbs - baseRow;
+          const cc = cAbs - baseCol;
+          const idx = rr * cols + cc;
           cells[idx] = code;
           if (code === CODE_ADD) add++;
           else if (code === CODE_REMOVE) remove++;
@@ -109,7 +129,7 @@ export function diffWorkbooks(curr, base) {
     summary.total.remove += remove;
     summary.total.value += value;
     summary.total.formula += formula;
-    bySheet[name] = { rows, cols, cells, counts: { add, remove, value, formula, changed } };
+    bySheet[name] = { rows, cols, rowBase: baseRow, colBase: baseCol, cells, counts: { add, remove, value, formula, changed } };
   }
 
   return { bySheet, sheetStatus, summary, codes: { CODE_NONE, CODE_ADD, CODE_REMOVE, CODE_VALUE, CODE_FORMULA } };
