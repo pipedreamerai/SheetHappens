@@ -28,7 +28,7 @@ Compare your current Excel workbook against a baseline (another .xlsx or a saved
 
 ### Install (no dev required)
 
-1. Download the production manifest: [Download `manifest.xml`](https://raw.githubusercontent.com/pipedreamerai/SheetHappens/main/manifest.xml)
+1. Download the production manifest `docs/addin/manifest.xml`
 2. macOS (Excel Desktop)
    - Copy `docs/addin/manifest.xml` to `~/Library/Containers/com.microsoft.Excel/Data/Documents/wef/` (create the `wef` folder if it doesn’t exist), then restart Excel.
 3. Windows or Excel 365
@@ -42,11 +42,10 @@ Notes
 
 ## Using the add-in
 
-1. Take a snapshot (optional)
+1. Take a snapshot (do this or choose a file)
    - Click “Take Snapshot” to store the current workbook as a local baseline.
-2. Choose a baseline
+2. Choose a separate Excel file (do this or take a snapshot)
    - Upload: Click “Choose File”, pick a .xlsx, then select it under “Baseline (uploads)”.
-   - Snapshot: Pick one under “Baseline (snapshots)”.
 3. Start the comparison
    - Click “Start Diff”. Sheet tabs are colored by severity; highlights appear as you activate sheets.
 4. Review changes
@@ -54,29 +53,29 @@ Notes
    - Select a highlighted cell to see a “New / Old” callout.
 5. Stop the comparison
    - Click “Stop Diff” to remove all highlights and reset tab colors.
-6. Optional: Revert a single cell
+6. Optional: Revert one or more cells
    - Select a changed cell and click “Revert Selection” to restore it to the baseline (added/removed/formula changes).
+   - Colors aren't removed automatically - just hit "Stop Diff"
+   - Cells in new tabs can't be reverted - but a new tab is by definition new, so just delete everything to revert
 
 ### Color semantics
 
 - Green: present now, blank in baseline (added)
 - Red: blank now, present in baseline (removed)
-- Orange: formula changed (FORMULATEXT differs)
+- Orange: hardcoded value, text, or formula changed
 - Yellow: value changed (same formula text)
 
 ## Notes and limitations
 
 - Local-only: snapshots are stored in your browser’s IndexedDB; no OneDrive/SharePoint
-- Visible sheets only (MVP)
+- Visible sheets only
 - Tables/pivots/charts/shapes/VBA are ignored
 - Dates are compared by numeric value (Excel serials)
 - Strings are compared trimmed; formulas compared by normalized text
 
 ## Troubleshooting
 
-- “Select a baseline first”: upload a file or pick a snapshot, then click Start Diff
-- “Failed to parse upload”: ensure a valid .xlsx
-- If Excel was already running, close and try `npm run dev` again
+- Use your best judgement, please send me any odd behaviors!
 
 ## Development
 
