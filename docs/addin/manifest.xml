@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0" xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="TaskPaneApp">
   <Id>bcd552f3-679e-4633-a62e-6c29f8cca01b</Id>
-  <Version>1.0.0.6</Version>
+  <Version>1.0.0.7</Version>
   <!-- Bumped version to force Excel to fetch updated assets after release -->
   <ProviderName>Pipedreamer</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
