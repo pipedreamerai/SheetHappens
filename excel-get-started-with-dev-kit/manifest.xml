@@ -5,10 +5,10 @@
   <ProviderName>Pipedreamer</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="SheetHappens"/>
-  <Description DefaultValue="A template to get started."/>
+  <Description DefaultValue="Track changes in your Excel workbook"/>
   <IconUrl DefaultValue="https://localhost:3000/assets/icon-32.png"/>
   <HighResolutionIconUrl DefaultValue="https://localhost:3000/assets/icon-64.png"/>
-  <SupportUrl DefaultValue="https://www.contoso.com/help"/>
+  <SupportUrl DefaultValue="https://github.com/pipedreamerai/excel_versioning"/>
   <AppDomains>
     <AppDomain>https://pipedreamerai.github.io/</AppDomain>
   </AppDomains>
