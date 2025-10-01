@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+excel-get-started-with-dev-kit/node_modules/
+
+# Build outputs (these are copied to docs/ for deployment)
+excel-get-started-with-dev-kit/dist/
+
+# Environment files
+.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+pnpm-debug.log*
+
+# Vercel
+.vercel
+

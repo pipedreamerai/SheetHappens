@@ -27,7 +27,7 @@
     "validate": "office-addin-manifest validate manifest.xml",
     "dev": "concurrently --kill-others-on-fail -n server,excel -c green,blue \"npm:dev-server\" \"npm:start:desktop\"",
     "watch": "webpack --mode development --watch",
-    "release": "npm run build && rsync -av --delete ./dist/ ../docs/addin/"
+    "release": "npm run build && node scripts/copy-to-docs.js"
   },
   "dependencies": {
     "core-js": "^3.36.0",
