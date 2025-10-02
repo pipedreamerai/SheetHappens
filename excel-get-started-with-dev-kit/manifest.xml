@@ -8,7 +8,7 @@
   <Description DefaultValue="Track changes in your Excel workbook"/>
   <IconUrl DefaultValue="https://localhost:3000/assets/icon-32.png"/>
   <HighResolutionIconUrl DefaultValue="https://localhost:3000/assets/icon-64.png"/>
-  <SupportUrl DefaultValue="https://github.com/pipedreamerai/excel_versioning"/>
+  <SupportUrl DefaultValue="https://sheethappens.vercel.app/support.html"/>
   <AppDomains>
     <AppDomain>https://sheethappens.vercel.app</AppDomain>
   </AppDomains>
