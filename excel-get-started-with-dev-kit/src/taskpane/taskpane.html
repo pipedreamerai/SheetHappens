@@ -25,6 +25,105 @@
     <section id="sideload-msg" class="ms-welcome__main">
         <h2 class="ms-font-xl">Please <a target="_blank" rel="noopener noreferrer" href="https://learn.microsoft.com/office/dev/add-ins/testing/test-debug-office-add-ins#sideload-an-office-add-in-for-testing">sideload</a> your add-in to see app body.</h2>
     </section>
+    <!-- First-run carousel -->
+    <div id="first-run-carousel" class="first-run-carousel is-hidden">
+        <div class="carousel-container">
+            <div class="carousel-slides">
+                <!-- Screen 1: Intro -->
+                <div class="carousel-slide active" data-slide="0">
+                    <div class="carousel-content">
+                        <h2 class="carousel-title">Welcome to SheetHappens</h2>
+                        <p class="carousel-text">
+                            Compare your Excel workbook against a baseline and visualize differences directly in your sheets. 
+                            All data stays local—no cloud integration required.
+                        </p>
+                        <p class="carousel-text">
+                            Track changes with color-coded highlights and see exactly what's been added, removed, or modified.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Screen 2: Buttons and Fields -->
+                <div class="carousel-slide" data-slide="1">
+                    <div class="carousel-content">
+                        <h2 class="carousel-title">Getting Started</h2>
+                        <img src="../../assets/Button Screenshot.png" alt="SheetHappens interface showing buttons and fields" class="carousel-screenshot" />
+                        <div class="carousel-feature-list">
+                            <div class="carousel-feature-item">
+                                <strong>Take Snapshot</strong> — Save the current workbook as a baseline
+                            </div>
+                            <div class="carousel-feature-item">
+                                <strong>Choose File</strong> — Upload a .xlsx file to compare against
+                            </div>
+                            <div class="carousel-feature-item">
+                                <strong>Baseline dropdowns</strong> — Select a saved snapshot or uploaded file
+                            </div>
+                            <div class="carousel-feature-item">
+                                <strong>Start Diff</strong> — Begin comparing and see changes highlighted
+                            </div>
+                            <div class="carousel-feature-item">
+                                <strong>Stop Diff</strong> — Remove all highlights and reset colors
+                            </div>
+                            <div class="carousel-feature-item">
+                                <strong>Revert Selection</strong> — Restore selected cells to baseline values
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Screen 3: Cell Overlays -->
+                <div class="carousel-slide" data-slide="2">
+                    <div class="carousel-content">
+                        <h2 class="carousel-title">Understanding Cell Highlights</h2>
+                        <div class="carousel-color-legend">
+                            <div class="color-item">
+                                <div class="color-swatch color-swatch-green"></div>
+                                <div class="color-label">
+                                    <strong>Green</strong> — Added (present now, blank in baseline)
+                                </div>
+                            </div>
+                            <div class="color-item">
+                                <div class="color-swatch color-swatch-red"></div>
+                                <div class="color-label">
+                                    <strong>Red</strong> — Removed (blank now, present in baseline)
+                                </div>
+                            </div>
+                            <div class="color-item">
+                                <div class="color-swatch color-swatch-yellow"></div>
+                                <div class="color-label">
+                                    <strong>Yellow</strong> — Value changed (same formula)
+                                </div>
+                            </div>
+                            <div class="color-item">
+                                <div class="color-swatch color-swatch-orange"></div>
+                                <div class="color-label">
+                                    <strong>Orange</strong> — Formula changed
+                                </div>
+                            </div>
+                        </div>
+                        <p class="carousel-text carousel-text-margin">
+                            Select any highlighted cell to see a "New / Old" callout showing the before and after values.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Navigation -->
+            <div class="carousel-nav">
+                <button id="carousel-prev" class="carousel-nav-btn" aria-label="Previous">Previous</button>
+                <div class="carousel-dots">
+                    <span class="carousel-dot active" data-slide="0" aria-label="Slide 1"></span>
+                    <span class="carousel-dot" data-slide="1" aria-label="Slide 2"></span>
+                    <span class="carousel-dot" data-slide="2" aria-label="Slide 3"></span>
+                </div>
+                <button id="carousel-next" class="carousel-nav-btn" aria-label="Next">Next</button>
+            </div>
+
+            <!-- Close button -->
+            <button id="carousel-close" class="carousel-close" aria-label="Close">Skip</button>
+        </div>
+    </div>
+
     <main id="app-body" class="ms-welcome__main is-hidden">
     <div class="compare-container" role="form" aria-label="SheetHappens">
 

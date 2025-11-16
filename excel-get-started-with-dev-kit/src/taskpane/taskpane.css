@@ -287,3 +287,253 @@ select#second-sheet {
 }
 
 /* dev logs removed for production */
+
+/* First-run carousel */
+.first-run-carousel {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 20px;
+}
+
+.first-run-carousel.is-hidden {
+    display: none;
+}
+
+.carousel-container {
+    background: #ffffff;
+    border-radius: 12px;
+    max-width: 500px;
+    width: 100%;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+    position: relative;
+}
+
+.carousel-slides {
+    position: relative;
+    min-height: 300px;
+    overflow: hidden;
+}
+
+.carousel-slide {
+    display: none;
+    padding: 32px 24px;
+    animation: fadeIn 0.3s ease-in;
+}
+
+.carousel-slide.active {
+    display: block;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateX(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+.carousel-content {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.carousel-title {
+    font-size: 24px;
+    font-weight: 600;
+    color: #111827;
+    margin: 0 0 8px 0;
+}
+
+.carousel-text {
+    font-size: 14px;
+    line-height: 1.6;
+    color: #4b5563;
+    margin: 0;
+}
+
+.carousel-screenshot {
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    margin: 16px 0;
+}
+
+.carousel-feature-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 8px;
+}
+
+.carousel-feature-item {
+    font-size: 14px;
+    line-height: 1.5;
+    color: #374151;
+    padding-left: 8px;
+}
+
+.carousel-feature-item strong {
+    color: #111827;
+    font-weight: 600;
+}
+
+.carousel-color-legend {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 8px;
+}
+
+.color-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.color-swatch {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    border: 1px solid #e5e7eb;
+    flex-shrink: 0;
+}
+
+.color-swatch-green {
+    background-color: #C6EFCE;
+}
+
+.color-swatch-red {
+    background-color: #FFC7CE;
+}
+
+.color-swatch-yellow {
+    background-color: #FFF2CC;
+}
+
+.color-swatch-orange {
+    background-color: #FFA500;
+}
+
+.carousel-text-margin {
+    margin-top: 16px;
+}
+
+.color-label {
+    font-size: 14px;
+    line-height: 1.5;
+    color: #374151;
+}
+
+.color-label strong {
+    color: #111827;
+    font-weight: 600;
+}
+
+.carousel-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 24px;
+    border-top: 1px solid #e5e7eb;
+    gap: 16px;
+}
+
+.carousel-nav-btn {
+    -webkit-appearance: none;
+    appearance: none;
+    border: 1px solid #e5e7eb;
+    background: #ffffff;
+    color: #111827;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background 120ms ease, border-color 120ms ease;
+    flex-shrink: 0;
+}
+
+.carousel-nav-btn:hover:not(:disabled) {
+    background: #f9fafb;
+    border-color: #d1d5db;
+}
+
+.carousel-nav-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.carousel-nav-btn:focus {
+    outline: none;
+    border-color: #93c5fd;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+}
+
+.carousel-dots {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex: 1;
+    justify-content: center;
+}
+
+.carousel-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #d1d5db;
+    cursor: pointer;
+    transition: background 120ms ease, transform 120ms ease;
+}
+
+.carousel-dot.active {
+    background: #6b7280;
+    transform: scale(1.2);
+}
+
+.carousel-dot:hover {
+    background: #9ca3af;
+}
+
+.carousel-close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    -webkit-appearance: none;
+    appearance: none;
+    border: none;
+    background: transparent;
+    color: #6b7280;
+    font-size: 14px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    transition: background 120ms ease, color 120ms ease;
+}
+
+.carousel-close:hover {
+    background: #f3f4f6;
+    color: #111827;
+}
+
+.carousel-close:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+}
