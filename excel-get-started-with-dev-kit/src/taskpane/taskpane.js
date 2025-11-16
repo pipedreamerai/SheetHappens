@@ -923,13 +923,143 @@ async function applyAddedSheetOverlays(diff) {
 
 // Removed dumpModelToLogsSheet in simplified UI
 
+// ===== First-run carousel =====
+const FIRST_RUN_SEEN_KEY = 'cc_first_run_seen_v1';
+
+function initFirstRunCarousel() {
+  const carousel = document.getElementById('first-run-carousel');
+  if (!carousel) return;
+
+  const hasSeenFirstRun = getSetting(FIRST_RUN_SEEN_KEY);
+  if (hasSeenFirstRun) {
+    // User has seen it, don't show
+    return;
+  }
+
+  // Show carousel
+  carousel.classList.remove('is-hidden');
+  
+  // Hide app body while carousel is showing
+  const appBody = document.getElementById('app-body');
+  if (appBody) appBody.classList.add('is-hidden');
+  
+  let currentSlide = 0;
+  const totalSlides = 3;
+
+  async function closeCarousel() {
+    // Mark as seen
+    try {
+      await saveSettingAsync(FIRST_RUN_SEEN_KEY, true);
+    } catch (_) {
+      // ignore save errors
+    }
+    // Hide carousel
+    carousel.classList.add('is-hidden');
+    // Show app body
+    const appBody = document.getElementById('app-body');
+    if (appBody) appBody.classList.remove('is-hidden');
+  }
+
+  function updateSlide(index) {
+    // Clamp index
+    if (index < 0) index = 0;
+    if (index >= totalSlides) index = totalSlides - 1;
+    currentSlide = index;
+
+    // Update slides
+    const slides = carousel.querySelectorAll('.carousel-slide');
+    slides.forEach((slide, i) => {
+      if (i === index) {
+        slide.classList.add('active');
+      } else {
+        slide.classList.remove('active');
+      }
+    });
+
+    // Update dots
+    const dots = carousel.querySelectorAll('.carousel-dot');
+    dots.forEach((dot, i) => {
+      if (i === index) {
+        dot.classList.add('active');
+      } else {
+        dot.classList.remove('active');
+      }
+    });
+
+    // Update nav buttons
+    const prevBtn = document.getElementById('carousel-prev');
+    const nextBtn = document.getElementById('carousel-next');
+    if (prevBtn) {
+      prevBtn.disabled = index === 0;
+    }
+    if (nextBtn) {
+      // On last slide, change text to "Finish" and enable it
+      if (index === totalSlides - 1) {
+        nextBtn.textContent = 'Finish';
+        nextBtn.disabled = false;
+      } else {
+        nextBtn.textContent = 'Next';
+        nextBtn.disabled = false;
+      }
+    }
+  }
+
+  // Previous button
+  const prevBtn = document.getElementById('carousel-prev');
+  if (prevBtn) {
+    prevBtn.addEventListener('click', () => {
+      updateSlide(currentSlide - 1);
+    });
+  }
+
+  // Next button
+  const nextBtn = document.getElementById('carousel-next');
+  if (nextBtn) {
+    nextBtn.addEventListener('click', async () => {
+      if (currentSlide === totalSlides - 1) {
+        // On last slide, close carousel
+        await closeCarousel();
+      } else {
+        // Otherwise, go to next slide
+        updateSlide(currentSlide + 1);
+      }
+    });
+  }
+
+  // Dot navigation
+  const dots = carousel.querySelectorAll('.carousel-dot');
+  dots.forEach((dot, index) => {
+    dot.addEventListener('click', () => {
+      updateSlide(index);
+    });
+  });
+
+  // Close button
+  const closeBtn = document.getElementById('carousel-close');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', async () => {
+      await closeCarousel();
+    });
+  }
+
+  // Initialize first slide
+  updateSlide(0);
+}
+
 // Wire up active controls when the task pane is ready
 Office.onReady(() => {
   try {
   const sideload = document.getElementById('sideload-msg');
   const appBody = document.getElementById('app-body');
   if (sideload) sideload.classList.add('is-hidden');
-  if (appBody) appBody.classList.remove('is-hidden');
+  
+  // Check and show first-run carousel if needed
+  const hasSeenFirstRun = getSetting(FIRST_RUN_SEEN_KEY);
+  if (hasSeenFirstRun) {
+    // User has seen carousel, show app body
+    if (appBody) appBody.classList.remove('is-hidden');
+  }
+  initFirstRunCarousel();
     // Wire Clear Logs button
     // Clear Logs UI removed for production
     // Startup banner: build/host/platform/version and requirement sets
